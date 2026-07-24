@@ -1,0 +1,27 @@
+.app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 3rem 1.5rem;
+  text-align: left;
+}
+
+.subtitle {
+  color: #666;
+  margin-top: -0.5rem;
+}
+
+.error {
+  color: #b3261e;
+}
+
+.result-card {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 1.25rem 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.result-card .summary {
+  margin-top: 1rem;
+  font-style: italic;
+}
