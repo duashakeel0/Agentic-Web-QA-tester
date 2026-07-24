@@ -39,6 +39,25 @@ Four agents cooperate through a shared FastAPI backend, each with one narrow job
 
 This scaffold (Day 1) stubs the pipeline with a fake `/api/mock-run` endpoint so the frontend/backend wiring is proven before any real agent logic exists — the four agents above get built out over the following tickets.
 
+## Frontend structure
+
+```
+frontend/src/
+├── assets/            # static images/icons
+├── shared-components/ # reusable UI components used across pages
+├── data/services/     # API calls to the backend
+├── hooks/             # custom hooks wrapping data-fetching/state logic
+├── layouts/           # shared page layout wrappers
+├── pages/             # one file per screen (Dashboard, etc.)
+├── routes/            # route definitions, once there's more than one page
+├── tests/             # frontend tests
+├── types/             # shared TypeScript types/interfaces
+├── utils/             # small standalone helper functions
+└── App.tsx            # thin root shell
+```
+
+Not every folder is populated yet — `layouts`, `routes`, `shared-components`, `tests`, and `utils` are empty placeholders for now, set up early so the project has a consistent place to grow into rather than needing a restructure later.
+
 ## Tech stack
 
 - **Frontend:** React + TypeScript, built with Vite
