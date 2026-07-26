@@ -12,7 +12,7 @@ function Dashboard() {
   return (
     <div className="page">
       <header className="hero">
-        <span className="eyebrow">Agentic Web QA Tester</span>
+        <span className="eyebrow">Day 2 — Browser Driver</span>
         <h1>Live Browser Test Runner</h1>
         <p className="subtitle">
           Point it at a URL and watch a real browser get driven live over a WebSocket.
