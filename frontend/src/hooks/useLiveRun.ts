@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getLiveRunSocketUrl } from "../data/services/liveRunService";
 import type { LiveRunMessage } from "../types/liveRun";
 
@@ -10,6 +10,8 @@ export function useLiveRun() {
   const socketRef = useRef<WebSocket | null>(null);
 
   const start = useCallback((url: string) => {
+    socketRef.current?.close();
+
     setLog([]);
     setResult(null);
     setError(null);
@@ -29,9 +31,11 @@ export function useLiveRun() {
         setLog((prev) => [...prev, data.message]);
         setResult({ url: data.url, title: data.title });
         setRunning(false);
+        socket.close();
       } else if (data.type === "error") {
         setError(data.message);
         setRunning(false);
+        socket.close();
       }
     };
 
@@ -41,6 +45,12 @@ export function useLiveRun() {
     };
 
     socket.onclose = () => setRunning(false);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      socketRef.current?.close();
+    };
   }, []);
 
   return { log, result, error, running, start };

@@ -9,26 +9,30 @@ This is a Phase 3 capstone project for an AI-focused internship (Arbisoft). Full
 ```mermaid
 flowchart TB
     User([User]) --> Dashboard["React Dashboard\n(live view + search bar)"]
-    Dashboard <-->|WebSocket| Backend["FastAPI Backend"]
+    Dashboard <-->|WebSocket - the only touchpoint| Backend
 
-    Backend --> Planner["Planner Agent"]
-    Planner -->|get_ticket| TicketMCP["Trello MCP Server\n(Jira-compatible design)"]
-    Planner --> Explorer["Explorer Agent"]
-    Explorer <-->|browser actions| Playwright["Playwright"]
-    Explorer --> Verifier["Verifier Agent"]
-    Verifier -.->|retries via| Playwright
-    Verifier --> Reporter["Reporter Agent"]
-    Reporter -->|post_summary| TicketMCP
+    subgraph Orchestration["Backend orchestrates every agent below"]
+        Backend["FastAPI Backend"] --> Planner["Planner Agent"]
+        Planner -->|get_ticket| TicketMCP["Trello MCP Server\n(Jira-compatible design)"]
+        Planner --> Explorer["Explorer Agent"]
+        Explorer <-->|browser actions| Playwright["Playwright"]
+        Explorer --> Verifier["Verifier Agent"]
+        Verifier -.->|retries via| Playwright
+        Verifier --> Reporter["Reporter Agent"]
+        Reporter -->|post_summary| TicketMCP
 
-    Scheduler["Scheduled Hook\n(nightly smoke test)"] --> Explorer
+        Scheduler["Scheduled Hook\n(nightly smoke test)"] --> Explorer
 
-    Planner -.->|planning| Claude["Claude API"]
-    Verifier -.->|verification| Claude
-    Reporter -.->|reporting| Claude
-    Explorer -.->|exploration decisions| Ollama["Ollama\n(Llama 3.1, local)"]
+        Planner -.->|planning| Claude["Claude API"]
+        Verifier -.->|verification| Claude
+        Reporter -.->|reporting| Claude
+        Explorer -.->|exploration decisions| Ollama["Ollama\n(Llama 3.1, local)"]
 
-    Backend <--> DB[("SQLite\n(memory + run history)")]
+        Backend <--> DB[("SQLite\n(memory + run history)")]
+    end
 ```
+
+The frontend never talks to the agents, Playwright, or Trello directly — only to the backend, which is the sole orchestrator of everything inside the box above.
 
 Four agents cooperate through a shared FastAPI backend, each with one narrow job:
 
@@ -37,7 +41,9 @@ Four agents cooperate through a shared FastAPI backend, each with one narrow job
 - **Verifier** — re-runs the steps behind any flagged issue once before it's accepted as a confirmed bug
 - **Reporter** — writes the final severity-ranked report and posts a summary back to the originating Trello ticket
 
-Day 1 stubbed the pipeline with a fake `/api/mock-run` endpoint so the frontend/backend wiring was proven before any real agent logic existed. Day 2 replaces that with a real Playwright-driven browser behind a WebSocket (`/ws/run`): the dashboard sends a URL, the backend launches a browser, navigates there, and streams live status updates back as it happens — the same live-connection pattern the four agents above will report through once they exist.
+Day 1 stubbed the pipeline with a fake `/api/v1/mock-run` endpoint so the frontend/backend wiring was proven before any real agent logic existed. Day 2 replaces that with a real Playwright-driven browser behind a WebSocket (`/ws/run`): the dashboard sends a URL, the backend launches a browser, navigates there, and streams live status updates back as it happens — the same live-connection pattern the four agents above will report through once they exist.
+
+The frontend only ever talks to the backend directly (over HTTP and the `/ws/run` WebSocket) — it never calls Playwright, the agents, or Trello itself. The backend is the sole orchestrator of everything below it in the diagram.
 
 ## Frontend structure
 

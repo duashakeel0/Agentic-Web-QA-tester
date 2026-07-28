@@ -1,19 +1,29 @@
 """Day 1 scaffolded the pipeline with mock data. Day 2 adds a real browser
 driver (Playwright) behind a WebSocket, so the dashboard gets live status
-updates as an actual page loads instead of one static fetch.
+updates as an actual page loads instead of one static fetch. Real agent
+logic (Planner, Explorer, Verifier, Reporter) is built out in future
+milestones.
 """
 
+from urllib.parse import urlparse
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.browser import BrowserSession
 
-app = FastAPI(title="Agentic Web QA Tester")
+load_dotenv()
+
+API_VERSION = "0.1.0"
+
+app = FastAPI(title="Agentic Web QA Tester", version=API_VERSION)
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -27,16 +37,21 @@ class TestRunResult(BaseModel):
     summary: str
 
 
-@app.get("/api/health")
+def _is_valid_http_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+@app.get("/api/v1/health")
 def health() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "service": "agentic-web-qa-tester-backend", "version": API_VERSION}
 
 
-@app.get("/api/mock-run", response_model=TestRunResult)
+@app.get("/api/v1/mock-run", response_model=TestRunResult)
 def mock_run() -> TestRunResult:
     """Stands in for a real test run until the Explorer/Verifier/Reporter
-    agents exist (Days 4-8). Returns a fixed, fake result so the frontend
-    has something real to fetch and render end to end."""
+    agents exist (future milestones). Returns a fixed, fake result so the
+    frontend has something real to fetch and render end to end."""
     return TestRunResult(
         status="complete",
         pages_visited=3,
@@ -61,6 +76,11 @@ async def run_live_test(websocket: WebSocket) -> None:
         url = data.get("url")
         if not url:
             await websocket.send_json({"type": "error", "message": "No URL provided."})
+            return
+        if not _is_valid_http_url(url):
+            await websocket.send_json(
+                {"type": "error", "message": f"'{url}' is not a valid http:// or https:// URL."}
+            )
             return
 
         await websocket.send_json({"type": "status", "message": "Launching browser..."})
