@@ -5,3 +5,5 @@ pydantic==2.13.4
 python-dotenv==1.2.2
 mcp[cli]==1.28.1
 httpx==0.28.1
+anthropic==0.120.2
+PyYAML==6.0.3

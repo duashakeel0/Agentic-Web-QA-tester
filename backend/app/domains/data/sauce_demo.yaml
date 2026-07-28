@@ -1,0 +1,28 @@
+name: sauce_demo
+base_url: https://www.saucedemo.com
+workflows:
+  - name: login
+    steps:
+      - Navigate to saucedemo.com
+      - Enter a valid username and password
+      - Click the Login button
+    expected_outcome:
+      url_contains: /inventory.html
+      text_contains: Products
+
+  - name: add_to_cart
+    steps:
+      - Log in with valid credentials
+      - Click "Add to cart" on a product
+      - Open the cart
+    expected_outcome:
+      url_contains: /cart.html
+
+  - name: checkout
+    steps:
+      - Log in and add an item to the cart
+      - Go to checkout and fill in the shipping information
+      - Complete the order
+    expected_outcome:
+      url_contains: /checkout-complete.html
+      text_contains: Thank you for your order
