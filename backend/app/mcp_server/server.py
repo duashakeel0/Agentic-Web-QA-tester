@@ -1,9 +1,17 @@
 """MCP server exposing Trello ticket access as two narrowly-scoped tools:
 get_ticket (read a ticket) and post_summary (write a run summary back).
 
-Run directly for MCP Inspector debugging:
+Run directly for MCP Inspector debugging (from the backend/ directory):
     mcp dev app/mcp_server/server.py
 """
+
+import sys
+from pathlib import Path
+
+# `mcp dev` loads this file directly by path, which doesn't put the
+# project's `backend/` directory on sys.path the way running the app
+# normally does - so the `app.*` import below would fail without this.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
