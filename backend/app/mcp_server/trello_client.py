@@ -12,7 +12,20 @@ TRELLO_BASE_URL = "https://api.trello.com/1"
 
 class TrelloError(Exception):
     """Raised for any Trello-specific failure, with a message specific
-    enough to act on (per the tool-design rule: no generic failures)."""
+    enough to act on (per the tool-design rule: no generic failures).
+    Never includes the request URL, since it carries the API key/token
+    as query params."""
+
+
+def _raise_for_status(response: httpx.Response, *, not_found_message: str) -> None:
+    if response.status_code == 404:
+        raise TrelloError(not_found_message)
+    if response.status_code == 400:
+        raise TrelloError("Trello rejected this ticket ID as invalid - it doesn't look like a real Trello card ID.")
+    if response.status_code == 401:
+        raise TrelloError("Trello rejected the API key/token - check they're valid and not expired.")
+    if not response.is_success:
+        raise TrelloError(f"Trello returned an unexpected error (status {response.status_code}).")
 
 
 class TrelloClient:
@@ -31,14 +44,13 @@ class TrelloClient:
     async def get_card(self, card_id: str) -> dict:
         """Fetches a card's title, description, and checklist items."""
         params = {**self._auth_params(), "checklists": "all", "fields": "name,desc"}
-        async with httpx.AsyncClient() as client:
-            response = await client.get(f"{TRELLO_BASE_URL}/cards/{card_id}", params=params)
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(f"{TRELLO_BASE_URL}/cards/{card_id}", params=params)
+        except httpx.RequestError:
+            raise TrelloError("Could not reach Trello - check your network connection and try again.")
 
-        if response.status_code == 404:
-            raise TrelloError(f"No card found with ID '{card_id}' on this board.")
-        if response.status_code == 401:
-            raise TrelloError("Trello rejected the API key/token - check they're valid and not expired.")
-        response.raise_for_status()
+        _raise_for_status(response, not_found_message=f"No card found with ID '{card_id}' on this board.")
 
         data = response.json()
         checklist_items = [
@@ -57,16 +69,17 @@ class TrelloClient:
     async def add_comment(self, card_id: str, text: str) -> dict:
         """Posts a comment onto a card - used to write a run summary back."""
         params = {**self._auth_params(), "text": text}
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"{TRELLO_BASE_URL}/cards/{card_id}/actions/comments", params=params
-            )
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{TRELLO_BASE_URL}/cards/{card_id}/actions/comments", params=params
+                )
+        except httpx.RequestError:
+            raise TrelloError("Could not reach Trello - check your network connection and try again.")
 
-        if response.status_code == 404:
-            raise TrelloError(f"No card found with ID '{card_id}' - cannot post a comment to it.")
-        if response.status_code == 401:
-            raise TrelloError("Trello rejected the API key/token - check they're valid and not expired.")
-        response.raise_for_status()
+        _raise_for_status(
+            response, not_found_message=f"No card found with ID '{card_id}' - cannot post a comment to it."
+        )
 
         data = response.json()
         return {"posted": True, "comment_id": data["id"]}
