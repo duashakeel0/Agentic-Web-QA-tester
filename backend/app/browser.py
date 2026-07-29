@@ -22,6 +22,12 @@ class BrowserSession:
         await self._page.goto(url)
         return await self._page.title()
 
+    @property
+    def page(self) -> Page:
+        if self._page is None:
+            raise RuntimeError("Browser session was not started.")
+        return self._page
+
     async def close(self) -> None:
         if self._browser is not None:
             await self._browser.close()

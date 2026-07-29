@@ -96,6 +96,14 @@ Then open `http://localhost:5173`, enter a URL, and click "Run test" — the das
 
 The backend also auto-generates interactive API docs at `http://localhost:8000/docs` (FastAPI's built-in OpenAPI/Swagger support) — no extra setup needed.
 
+**Explorer agent (needs Ollama running locally):**
+```bash
+ollama serve
+ollama pull llama3.1
+python -m app.agents.run_explorer <ticket_id>
+```
+This runs the Planner and Explorer back to back against a real ticket and prints the exploration log. `OLLAMA_HOST`/`OLLAMA_MODEL` in `.env` can point at a different host or model if needed.
+
 ## Project log
 
 See `prompts.md` for a running log of significant AI prompts used to build this project.

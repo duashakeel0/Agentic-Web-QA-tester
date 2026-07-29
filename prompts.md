@@ -131,3 +131,26 @@ Running log of significant AI prompts used to build this project, per the intern
 - Re-confirmed all 3 domain YAML files (`campushub`, `sauce_demo`, `the_internet`) still load into validated `Domain`/`Workflow` objects with the corrected data
 - Demonstrated the "zero code changes" extensibility claim directly: added a temporary 4th domain YAML file with no matching code changes, confirmed via `load_domains()` that it was picked up automatically, then removed it and confirmed `git status` showed no trace left behind
 - Day 5's acceptance criteria is now fully closed: schema, manifest loader, and all 3 real registered domains (one self-built, two established practice sites) working and verified
+
+---
+
+## Day 6 — Explorer Agent
+
+**Prompt:** Build the Explorer - the only agent that touches the browser. It takes the Planner's plan and drives Playwright through the stored workflow's steps, deciding each concrete browser action from the current page state (via Llama 3.1 running locally through Ollama) instead of following a fixed script, so a stored workflow keeps working even if a page's layout shifts slightly.
+
+**What was generated:**
+- `backend/app/agents/ollama_client.py` — a thin wrapper around Ollama's local REST API (`/api/generate`, `format: "json"`), raising a specific `OllamaError` for an unreachable server, a non-200 response, or a response that isn't parseable JSON
+- `backend/app/agents/explorer.py` — `ExplorerAgent`: for each step in the plan, takes a snapshot of the current page's interactive elements, asks the local model to decide the single next action (fill/click/select/press/navigate/done), executes it via Playwright, and logs the action plus the model's stated reasoning. Also runs one deliberate broken-input attempt (empty/invalid value) on the first genuinely interactive step of each workflow, tagged separately from the real attempt so the Reporter can tell them apart. A per-step action budget and a same-action repeat counter stop it from looping forever if the model gets stuck suggesting the same click over and over.
+- `backend/app/agents/schema.py` — added `ActionLogEntry` and `ExplorationResult`, the structured, validated shape the Reporter will read next.
+- `backend/app/agents/run_explorer.py` — a CLI (`python -m app.agents.run_explorer <ticket_id>`) that runs the Planner and Explorer back to back against a real ticket and prints the full exploration log.
+- `backend/app/browser.py` — added a `page` property so the Explorer can drive Playwright's fill/click/select/evaluate calls directly instead of only the single `goto()` method Day 2 needed.
+- `backend/.env.example` — documents `OLLAMA_HOST`/`OLLAMA_MODEL`.
+- README — added the Explorer's local run instructions (`ollama serve`, pull `llama3.1`, run the CLI).
+
+**What was checked/modified before accepting:**
+- Verified all 4 `OllamaClient` error paths against a mocked HTTP layer: unreachable server, non-200 response, malformed JSON in the model's response, and a valid response parsing correctly
+- Built a small local static page (a login form with real inputs and a real "empty fields → error, otherwise → welcome message" script) and drove the real Explorer against it end to end with a scripted stand-in for Ollama (so the actual browser/logging/loop-guard code runs for real, without depending on a live Ollama server in this environment): confirmed the happy path completes, exactly one broken-input attempt is logged with the deliberately empty value, and the final page text correctly reflects the real "Welcome" message
+- Verified the loop guard: fed the Explorer the same action repeatedly and confirmed it stops with a clear error after a bounded number of repeats instead of looping forever
+- Verified an unmatched plan and a plan referencing an unregistered domain are both rejected before the browser is ever launched
+- Caught and fixed a bug in my own test setup during this process (not the Explorer itself): a "Navigate to..." step still goes through the same decision loop as any other step (so it can confirm the page already satisfies it), which my first test script didn't account for - once fixed, the real behavior was confirmed correct
+- **Not yet completed:** the acceptance criteria requires testing end-to-end against all 3 real registered domains with a real local Llama 3.1 - Ollama isn't available in this environment, so that live run (and any real bugs it turns up) is still outstanding, the same way Day 3's real-Trello-board verification and Day 4's real-Claude verification were.
