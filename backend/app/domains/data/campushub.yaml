@@ -1,29 +1,27 @@
-# NOTE: base_url is a placeholder (CampusHub's typical local dev address).
-# Update it to wherever your CampusHub instance actually runs before
-# testing tickets against this domain.
+# base_url assumes the frontend is running locally on Vite's default dev
+# port. Update if CampusHub is ever deployed somewhere else.
 name: campushub
-base_url: http://localhost:8000
+base_url: http://localhost:5173
 workflows:
   - name: student_login
     steps:
       - Navigate to /login
-      - Enter valid student credentials
+      - Enter a valid username and password
       - Submit the login form
     expected_outcome:
-      url_contains: /dashboard
-      text_contains: Welcome
+      text_contains: Welcome to CampusHub
 
   - name: mark_attendance
     steps:
-      - Log in as an admin or teacher
-      - Navigate to the attendance page
-      - Mark a student present and submit
+      - Log in with valid credentials
+      - Navigate to /attendance
+      - Fill in the attendance form for a student and submit
     expected_outcome:
-      text_contains: Attendance recorded
+      text_contains: Attendance marked successfully
 
   - name: view_own_records
     steps:
-      - Log in as a student
-      - Navigate to attendance records
+      - Log in with valid credentials
+      - Navigate to /attendance
     expected_outcome:
-      text_contains: My Attendance
+      text_contains: Attendance Records
