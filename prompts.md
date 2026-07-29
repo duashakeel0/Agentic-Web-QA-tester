@@ -117,3 +117,17 @@ Running log of significant AI prompts used to build this project, per the intern
 - Verified live against 4 real Trello tickets once a real `ANTHROPIC_API_KEY` was available: 3 tickets spanning 2 domains (`sauce_demo`, `the_internet`) all matched correctly with the right workflow and steps; 1 deliberately unregistered-domain ticket (Amazon) correctly returned `matched: false` with a clear reason instead of a guessed or hallucinated match
 
 **Note on Day 5 overlap:** building the domain knowledge store here (to unblock the Planner) completes most of Day 5's acceptance criteria as a side effect - the schema, the manifest loader, and 2 of the 3 domains (`sauce_demo`, `the_internet`) are fully working and proven by the live test above. Still open for Day 5 specifically: `campushub`'s `base_url` is a placeholder pending the real local address, and the "add a 4th domain with zero code changes" claim hasn't been demonstrated yet.
+
+---
+
+## Day 5 — Domain Knowledge Store: Real CampusHub Data & Extensibility Proof
+
+**Prompt:** Close out the two things Day 4 left open for this ticket: replace CampusHub's placeholder route/success-text data with the real values from the actual frontend, and demonstrate that a new domain can be registered with zero code changes.
+
+**What was generated/changed:**
+- `backend/app/domains/data/campushub.yaml` — replaced the guessed routes and success text with the real ones from CampusHub's own source: `/login` (form submit shows a "Welcome back!" toast and redirects to `/`, the dashboard, which renders "Welcome to CampusHub"), `/attendance` (submitting the form shows an "Attendance marked successfully!" toast, and the same page lists an "Attendance Records" table). `base_url` corrected to the frontend's actual local dev address rather than the backend API port.
+
+**What was checked/modified before accepting:**
+- Re-confirmed all 3 domain YAML files (`campushub`, `sauce_demo`, `the_internet`) still load into validated `Domain`/`Workflow` objects with the corrected data
+- Demonstrated the "zero code changes" extensibility claim directly: added a temporary 4th domain YAML file with no matching code changes, confirmed via `load_domains()` that it was picked up automatically, then removed it and confirmed `git status` showed no trace left behind
+- Day 5's acceptance criteria is now fully closed: schema, manifest loader, and all 3 real registered domains (one self-built, two established practice sites) working and verified
