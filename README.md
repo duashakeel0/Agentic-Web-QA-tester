@@ -104,6 +104,12 @@ python -m app.agents.run_explorer <ticket_id>
 ```
 This runs the Planner and Explorer back to back against a real ticket and prints the exploration log. `OLLAMA_HOST`/`OLLAMA_MODEL` in `.env` can point at a different host or model if needed.
 
+**Verifier agent** (chains onto the above - no extra setup needed):
+```bash
+python -m app.agents.run_verifier <ticket_id>
+```
+Runs Planner → Explorer → Verifier back to back, reusing the Explorer's own live browser session for the Verifier's re-check, and prints the final pass/fail verdict.
+
 ## Project log
 
 See `prompts.md` for a running log of significant AI prompts used to build this project.
