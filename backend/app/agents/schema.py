@@ -50,3 +50,32 @@ class VerifierResult(BaseModel):
     retry_error: str | None = None
     explanation: str | None = None
     explanation_status: str = "ok"  # "ok" | "inconclusive" | "skipped"
+    screenshot_path: str | None = None
+
+
+class RunResult(BaseModel):
+    """Pairs one Explorer outcome with its Verifier outcome - the Reporter's
+    unit of input. A real run today produces exactly one of these per
+    ticket, but the Reporter takes a list so it's ready for the Scheduler's
+    future nightly batch across several workflows at once."""
+
+    exploration: ExplorationResult
+    verification: VerifierResult
+
+
+class Finding(BaseModel):
+    ticket_id: str
+    domain: str
+    workflow: str
+    severity: str  # "high" | "medium" | "low"
+    summary: str
+    reproduction_steps: list[str]
+    screenshot_path: str | None = None
+    explanation: str | None = None
+
+
+class Report(BaseModel):
+    ticket_id: str
+    findings: list[Finding]  # ranked, highest severity first
+    post_summary_status: str = "pending"  # "posted" | "failed"
+    post_summary_error: str | None = None
