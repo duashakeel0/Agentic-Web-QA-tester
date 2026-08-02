@@ -36,3 +36,17 @@ class ExplorationResult(BaseModel):
     final_url: str | None = None
     final_page_text: str | None = None
     error: str | None = None
+
+
+class VerifierResult(BaseModel):
+    ticket_id: str
+    domain: str
+    workflow: str
+    verdict: str  # "pass" | "fail"
+    assertion_checked: dict
+    initial_check_passed: bool
+    retried: bool
+    retry_passed: bool | None = None
+    retry_error: str | None = None
+    explanation: str | None = None
+    explanation_status: str = "ok"  # "ok" | "inconclusive" | "skipped"

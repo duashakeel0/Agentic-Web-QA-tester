@@ -51,7 +51,15 @@ class ExplorerAgent:
         self._browser = browser or BrowserSession()
         self._ollama = ollama or OllamaClient()
 
-    async def explore(self, plan: TestPlan) -> ExplorationResult:
+    @property
+    def browser(self) -> BrowserSession:
+        return self._browser
+
+    async def explore(self, plan: TestPlan, close_browser: bool = True) -> ExplorationResult:
+        """close_browser=False leaves the browser session open on completion
+        (but always closes it if exploration fails) so the Verifier can
+        re-check the result on the exact same live page/session instead of
+        a fresh, logged-out one."""
         if not plan.matched or not plan.domain or not plan.workflow:
             raise ExplorerError("Explorer requires a matched plan with a domain and workflow.")
 
@@ -61,6 +69,7 @@ class ExplorerAgent:
 
         actions: list[ActionLogEntry] = []
         broken_input_done = False
+        completed_ok = False
 
         await self._browser.start()
         try:
@@ -74,6 +83,7 @@ class ExplorerAgent:
                 await self._execute_step(step, actions)
 
             final_text = await self._browser.page.evaluate("() => document.body.innerText")
+            completed_ok = True
             return ExplorationResult(
                 ticket_id=plan.ticket_id,
                 domain=plan.domain,
@@ -93,7 +103,8 @@ class ExplorerAgent:
                 error=str(exc),
             )
         finally:
-            await self._browser.close()
+            if not (completed_ok and not close_browser):
+                await self._browser.close()
 
     @staticmethod
     def _is_interactive_step(step: str) -> bool:

@@ -154,3 +154,21 @@ Running log of significant AI prompts used to build this project, per the intern
 - Verified an unmatched plan and a plan referencing an unregistered domain are both rejected before the browser is ever launched
 - Caught and fixed a bug in my own test setup during this process (not the Explorer itself): a "Navigate to..." step still goes through the same decision loop as any other step (so it can confirm the page already satisfies it), which my first test script didn't account for - once fixed, the real behavior was confirmed correct
 - **Not yet completed:** the acceptance criteria requires testing end-to-end against all 3 real registered domains with a real local Llama 3.1 - Ollama isn't available in this environment, so that live run (and any real bugs it turns up) is still outstanding, the same way Day 3's real-Trello-board verification and Day 4's real-Claude verification were.
+
+---
+
+## Day 7 — Verifier Agent and failure handling
+
+**Prompt:** Build the Verifier - it checks the Explorer's result against the workflow's stored, known-correct assertion instead of a subjective read of the page ("loaded with no error" isn't the same as "correct"), retries once before confirming anything to separate a one-off slow render from a real bug, and handles the failure-mode behavior committed to in the proposal (LLM timeouts, browser crashes) explicitly rather than letting them hang or fail silently.
+
+**What was generated:**
+- `backend/app/agents/verifier.py` — `VerifierAgent`: checks the Explorer's final URL/page text against the workflow's stored `expected_outcome` (url/text assertions - never a generic pass/fail). A failed check is re-run once on the exact same live page the Explorer ended on (not a fresh, logged-out navigation) after a short wait, which is what actually distinguishes a slow render from a real bug. Also asks Claude for a one-sentence, human-readable explanation of the verdict for the Reporter; that call has its own timeout with one retry at a shorter timeout, and a second failure is marked `inconclusive` explicitly rather than silently folded into a pass or a fail.
+- `backend/app/agents/schema.py` — added `VerifierResult`.
+- `backend/app/agents/explorer.py` — added a `close_browser` option and a `browser` property so the Verifier can reuse the Explorer's still-open session for its re-check instead of losing login state on a fresh navigation.
+- `backend/app/agents/run_verifier.py` — CLI that chains Planner → Explorer → Verifier against a real ticket and prints the final verdict.
+- README — added the Verifier's run instructions.
+
+**What was checked/modified before accepting:**
+- A full mocked test suite exercising the real `VerifierAgent` code (not reimplemented logic) across: a clean pass needing no retry; a retry correctly filtering a one-off slow render (the same live page returns the right text a moment later); a deliberately broken step staying flagged as a real failure even after the retry; a browser crash mid-recheck producing a clean teardown and a specific error message instead of a hang; an LLM call timing out once and succeeding on the shorter retry; two consecutive LLM timeouts being marked `inconclusive` without ever silently flipping the underlying pass/fail verdict; and an incomplete exploration failing immediately without wasting a retry or an LLM call on it.
+- Additionally ran one real end-to-end pass through an actual live browser (not mocked) against a small test page with a deliberately introduced bug - a login button that navigates to the wrong page instead of showing the expected welcome text - and confirmed the Verifier correctly caught and flagged it as a failure after the retry, using the real Explorer→Verifier browser hand-off.
+- **Not yet completed:** live verification against all 3 real registered domains still depends on the same local Ollama setup Day 6 is waiting on.
