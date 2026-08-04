@@ -19,7 +19,11 @@ class BrowserSession:
     async def goto(self, url: str) -> str:
         if self._page is None:
             raise RuntimeError("Browser session was not started before goto().")
-        await self._page.goto(url)
+        # "domcontentloaded" fires once the page's HTML is parsed, rather
+        # than waiting for every last subresource (ads, trackers, fonts) to
+        # finish - many real-world sites never cleanly hit the "load" event
+        # at all, which was timing out real, working pages.
+        await self._page.goto(url, wait_until="domcontentloaded", timeout=45000)
         return await self._page.title()
 
     @property

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useLiveRun } from "../hooks/useLiveRun";
 import "./Dashboard.css";
 
+const EXAMPLE_URLS = ["https://www.saucedemo.com", "https://the-internet.herokuapp.com", "https://example.com"];
+
 function Dashboard() {
   const [url, setUrl] = useState("https://example.com");
   const { log, result, error, running, start } = useLiveRun();
@@ -38,12 +40,32 @@ function Dashboard() {
           </button>
         </form>
 
+        <div className="example-row">
+          <span className="example-label">Try:</span>
+          {EXAMPLE_URLS.map((example) => (
+            <button
+              key={example}
+              type="button"
+              className="example-chip"
+              disabled={running}
+              onClick={() => setUrl(example)}
+            >
+              {example.replace("https://", "")}
+            </button>
+          ))}
+        </div>
+
         <div className="status-row">
           <span className={`status-dot status-${status}`} />
           <span className="status-label">{statusLabel}</span>
         </div>
 
-        {error && <p className="error">Could not complete run: {error}</p>}
+        {error && (
+          <div className="error-card">
+            <span className="error-label">Run failed</span>
+            <p className="error-message">{error}</p>
+          </div>
+        )}
 
         {log.length > 0 && (
           <div className="log-console">
