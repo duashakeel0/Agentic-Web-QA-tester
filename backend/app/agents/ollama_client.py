@@ -12,6 +12,12 @@ import httpx
 
 DEFAULT_HOST = "http://localhost:11434"
 DEFAULT_MODEL = "llama3.1"
+# Generous on purpose: Ollama has to load the full model into memory on its
+# first call (can take well over a minute on a laptop CPU), and every call
+# after that runs on the model but still has no hard upper bound on a slow
+# machine - too short a timeout here reads as "Ollama isn't running" when
+# it's actually just still thinking.
+REQUEST_TIMEOUT_SECONDS = 180.0
 
 
 class OllamaError(Exception):
@@ -29,7 +35,7 @@ class OllamaClient:
         parseable JSON - callers should not have to deal with raw httpx or
         json exceptions."""
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
                 response = await client.post(
                     f"{self._host}/api/generate",
                     json={
@@ -39,6 +45,12 @@ class OllamaClient:
                         "format": "json",
                     },
                 )
+        except httpx.TimeoutException as exc:
+            raise OllamaError(
+                f"Ollama at {self._host} didn't respond within {REQUEST_TIMEOUT_SECONDS:.0f}s - "
+                f"it's likely still loading the model into memory on its first call, or the "
+                f"machine is slow. Try again once Ollama's warmed up. ({exc})"
+            ) from exc
         except httpx.RequestError as exc:
             raise OllamaError(
                 f"Could not reach Ollama at {self._host} - is it running? ({exc})"
