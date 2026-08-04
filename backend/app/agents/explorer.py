@@ -117,6 +117,15 @@ class ExplorerAgent:
 
     async def _execute_action(self, action: str, selector: str | None, value: str | None) -> tuple[bool, str | None]:
         page = self._browser.page
+        # A model call can succeed but still omit a field the action actually
+        # needs (e.g. "navigate" with no URL) - checked explicitly so a
+        # missing field is a clean failed action, not a crash deep inside
+        # Playwright over a required-but-missing positional argument.
+        if action in ("fill", "click", "select", "press") and not selector:
+            return False, f"Model returned {action!r} with no selector."
+        if action == "navigate" and not value:
+            return False, "Model returned 'navigate' with no URL."
+
         try:
             if action == "fill":
                 await page.fill(selector, value or "")
