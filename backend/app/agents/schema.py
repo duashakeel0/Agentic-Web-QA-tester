@@ -79,3 +79,51 @@ class Report(BaseModel):
     findings: list[Finding]  # ranked, highest severity first
     post_summary_status: str = "pending"  # "posted" | "failed"
     post_summary_error: str | None = None
+
+
+class StepTiming(BaseModel):
+    """One pipeline stage's timing on one provider - the raw material the
+    dashboard's per-step timestamps and the comparison report's timing
+    numbers are both built from."""
+
+    agent: str  # "planner" | "explorer" | "verifier" | "reporter"
+    provider: str  # "claude" | "ollama"
+    model: str
+    started_at: float  # unix timestamp
+    finished_at: float
+    duration_ms: float
+
+
+class PipelineResult(BaseModel):
+    """One full Planner -> Explorer -> Verifier -> Reporter run, entirely on
+    one provider. A single-model ticket run produces exactly one of these;
+    when the user picks "both", two run side by side and feed a
+    ComparisonReport."""
+
+    ticket_id: str
+    provider: str  # "claude" | "ollama"
+    plan: TestPlan
+    exploration: ExplorationResult | None = None
+    verification: VerifierResult | None = None
+    report: Report | None = None
+    timings: list[StepTiming] = []
+    started_at: float
+    finished_at: float
+    total_duration_ms: float
+
+
+class ComparisonReport(BaseModel):
+    """Built once both providers' PipelineResults are in for the same
+    ticket - a diff over the two runs, not a pipeline run itself."""
+
+    ticket_id: str
+    faster_provider: str | None = None
+    time_difference_ms: float = 0.0
+    verdict_agreement: bool = True
+    claude_verdict: str | None = None
+    ollama_verdict: str | None = None
+    claude_total_duration_ms: float = 0.0
+    ollama_total_duration_ms: float = 0.0
+    claude_findings_count: int = 0
+    ollama_findings_count: int = 0
+    summary: str
