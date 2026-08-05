@@ -20,8 +20,17 @@ from app.agents.explorer import ExplorerAgent
 from app.agents.llm_client import LLMClient
 from app.agents.ollama_client import OllamaLLMClient
 from app.agents.planner import PlannerAgent
+from app.agents.pricing import estimate_cost_usd
 from app.agents.reporter import ReporterAgent
-from app.agents.schema import ComparisonReport, PipelineResult, RunResult, StepTiming
+from app.agents.schema import (
+    ComparisonReport,
+    ExplorationResult,
+    PipelineResult,
+    RunMetrics,
+    RunResult,
+    StepTiming,
+    TestPlan,
+)
 from app.agents.verifier import VerifierAgent
 
 T = TypeVar("T")
@@ -64,6 +73,40 @@ def _narrate(agent_name: str, result) -> str:
         count = len(result.findings)
         return f"Report ready - {count} confirmed finding(s)." if count else "Report ready - no confirmed findings."
     return ""
+
+
+def _compute_metrics(plan: TestPlan, exploration: ExplorationResult | None, llm: LLMClient) -> RunMetrics:
+    """Coverage/accuracy/cost for one run, read off the shared LLMClient's
+    running totals (every agent in a run uses the same instance) plus the
+    Explorer's action log."""
+    cost_usd = estimate_cost_usd(llm.provider, llm.total_input_tokens, llm.total_output_tokens)
+    base = {
+        "llm_call_count": llm.call_count,
+        "input_tokens": llm.total_input_tokens,
+        "output_tokens": llm.total_output_tokens,
+        "estimated_cost_usd": cost_usd,
+    }
+    steps_planned = len(plan.steps)
+
+    if exploration is None:
+        return RunMetrics(steps_planned=steps_planned, steps_covered=0, missed_steps=list(plan.steps), **base)
+
+    real_actions = [a for a in exploration.actions if not a.is_broken_input_attempt]
+    covered_steps = list(dict.fromkeys(a.step for a in real_actions))
+    missed_steps = [s for s in plan.steps if s not in covered_steps]
+    actions_attempted = len(real_actions)
+    actions_succeeded = sum(1 for a in real_actions if a.success)
+
+    return RunMetrics(
+        steps_planned=steps_planned,
+        steps_covered=len(covered_steps),
+        coverage_ratio=(len(covered_steps) / steps_planned) if steps_planned else 0.0,
+        missed_steps=missed_steps,
+        actions_attempted=actions_attempted,
+        actions_succeeded=actions_succeeded,
+        accuracy_ratio=(actions_succeeded / actions_attempted) if actions_attempted else 0.0,
+        **base,
+    )
 
 
 async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | None = None) -> PipelineResult:
@@ -114,6 +157,7 @@ async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | 
             provider=provider,
             plan=plan,
             timings=timings,
+            metrics=_compute_metrics(plan, None, llm),
             started_at=started_at,
             finished_at=finished_at,
             total_duration_ms=(finished_at - started_at) * 1000,
@@ -151,6 +195,7 @@ async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | 
         verification=verification,
         report=report,
         timings=timings,
+        metrics=_compute_metrics(plan, exploration, llm),
         started_at=started_at,
         finished_at=finished_at,
         total_duration_ms=(finished_at - started_at) * 1000,
@@ -179,6 +224,11 @@ def _compare(ticket_id: str, claude_result: PipelineResult, ollama_result: Pipel
     claude_findings = len(claude_result.report.findings) if claude_result.report else 0
     ollama_findings = len(ollama_result.report.findings) if ollama_result.report else 0
 
+    claude_metrics, ollama_metrics = claude_result.metrics, ollama_result.metrics
+    cheaper = cost_difference_usd = more_accurate = better_coverage = None
+    missed_only_by_claude: list[str] = []
+    missed_only_by_ollama: list[str] = []
+
     summary_lines = [
         f"Claude finished in {claude_result.total_duration_ms:.0f}ms, "
         f"Ollama finished in {ollama_result.total_duration_ms:.0f}ms "
@@ -191,6 +241,29 @@ def _compare(ticket_id: str, claude_result: PipelineResult, ollama_result: Pipel
         )
     summary_lines.append(f"Claude confirmed {claude_findings} finding(s), Ollama confirmed {ollama_findings}.")
 
+    if claude_metrics and ollama_metrics:
+        cost_difference_usd = abs(claude_metrics.estimated_cost_usd - ollama_metrics.estimated_cost_usd)
+        cheaper = "claude" if claude_metrics.estimated_cost_usd <= ollama_metrics.estimated_cost_usd else "ollama"
+        more_accurate = "claude" if claude_metrics.accuracy_ratio >= ollama_metrics.accuracy_ratio else "ollama"
+        better_coverage = "claude" if claude_metrics.coverage_ratio >= ollama_metrics.coverage_ratio else "ollama"
+
+        claude_missed, ollama_missed = set(claude_metrics.missed_steps), set(ollama_metrics.missed_steps)
+        missed_only_by_claude = sorted(claude_missed - ollama_missed)
+        missed_only_by_ollama = sorted(ollama_missed - claude_missed)
+
+        summary_lines.append(
+            f"Coverage: Claude {claude_metrics.coverage_ratio:.0%}, Ollama {ollama_metrics.coverage_ratio:.0%}. "
+            f"Accuracy: Claude {claude_metrics.accuracy_ratio:.0%}, Ollama {ollama_metrics.accuracy_ratio:.0%}."
+        )
+        summary_lines.append(
+            f"Estimated cost: Claude ${claude_metrics.estimated_cost_usd:.4f}, Ollama $0.0000 (runs locally) - "
+            f"{cheaper} is cheaper by ${cost_difference_usd:.4f}."
+        )
+        if missed_only_by_claude:
+            summary_lines.append(f"Steps only Claude missed: {', '.join(missed_only_by_claude)}.")
+        if missed_only_by_ollama:
+            summary_lines.append(f"Steps only Ollama missed: {', '.join(missed_only_by_ollama)}.")
+
     return ComparisonReport(
         ticket_id=ticket_id,
         faster_provider=faster,
@@ -202,5 +275,13 @@ def _compare(ticket_id: str, claude_result: PipelineResult, ollama_result: Pipel
         ollama_total_duration_ms=ollama_result.total_duration_ms,
         claude_findings_count=claude_findings,
         ollama_findings_count=ollama_findings,
+        claude_metrics=claude_metrics,
+        ollama_metrics=ollama_metrics,
+        missed_only_by_claude=missed_only_by_claude,
+        missed_only_by_ollama=missed_only_by_ollama,
+        cost_difference_usd=cost_difference_usd or 0.0,
+        cheaper_provider=cheaper,
+        more_accurate_provider=more_accurate,
+        better_coverage_provider=better_coverage,
         summary="\n".join(summary_lines),
     )

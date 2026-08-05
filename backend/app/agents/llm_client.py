@@ -26,11 +26,22 @@ class LLMResponse:
     started_at: float  # unix timestamp (time.time())
     finished_at: float
     duration_ms: float
+    input_tokens: int | None = None
+    output_tokens: int | None = None
 
 
 class LLMClient(ABC):
     provider: str
     model: str
+
+    def __init__(self) -> None:
+        # Running totals across every call made through this instance. Every
+        # agent in one pipeline run shares the same LLMClient, so reading
+        # these after a run gives the whole run's usage/cost without having
+        # to thread per-call numbers back through each agent's return value.
+        self.call_count = 0
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
 
     @abstractmethod
     async def complete(self, prompt: str, *, max_tokens: int = 300, timeout: float | None = None) -> LLMResponse:
@@ -38,6 +49,11 @@ class LLMClient(ABC):
         Raises LLMError for anything that isn't a successful response in
         time - callers never have to deal with provider-specific
         exceptions (httpx, anthropic's APIError, etc.) directly."""
+
+    def _record_usage(self, response: LLMResponse) -> None:
+        self.call_count += 1
+        self.total_input_tokens += response.input_tokens or 0
+        self.total_output_tokens += response.output_tokens or 0
 
     async def complete_json(
         self, prompt: str, *, max_tokens: int = 300, timeout: float | None = None

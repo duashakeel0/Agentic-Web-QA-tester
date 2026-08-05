@@ -94,6 +94,23 @@ class StepTiming(BaseModel):
     duration_ms: float
 
 
+class RunMetrics(BaseModel):
+    """Quality/cost numbers for one provider's run - what the comparison
+    dashboard actually diffs, beyond the raw pass/fail verdict."""
+
+    steps_planned: int
+    steps_covered: int  # steps the Explorer at least attempted, in order
+    coverage_ratio: float = 0.0  # steps_covered / steps_planned, 0.0-1.0
+    missed_steps: list[str] = []  # planned steps never reached
+    actions_attempted: int = 0  # real actions, excluding broken-input probes
+    actions_succeeded: int = 0
+    accuracy_ratio: float = 0.0  # actions_succeeded / actions_attempted, 0.0-1.0
+    llm_call_count: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    estimated_cost_usd: float = 0.0
+
+
 class PipelineResult(BaseModel):
     """One full Planner -> Explorer -> Verifier -> Reporter run, entirely on
     one provider. A single-model ticket run produces exactly one of these;
@@ -107,6 +124,7 @@ class PipelineResult(BaseModel):
     verification: VerifierResult | None = None
     report: Report | None = None
     timings: list[StepTiming] = []
+    metrics: RunMetrics | None = None
     started_at: float
     finished_at: float
     total_duration_ms: float
@@ -126,4 +144,12 @@ class ComparisonReport(BaseModel):
     ollama_total_duration_ms: float = 0.0
     claude_findings_count: int = 0
     ollama_findings_count: int = 0
+    claude_metrics: RunMetrics | None = None
+    ollama_metrics: RunMetrics | None = None
+    missed_only_by_claude: list[str] = []
+    missed_only_by_ollama: list[str] = []
+    cost_difference_usd: float = 0.0
+    cheaper_provider: str | None = None
+    more_accurate_provider: str | None = None
+    better_coverage_provider: str | None = None
     summary: str

@@ -25,6 +25,7 @@ class OllamaLLMClient(LLMClient):
     provider = "ollama"
 
     def __init__(self, host: str | None = None, model: str | None = None) -> None:
+        super().__init__()
         self._host = host or os.environ.get("OLLAMA_HOST", DEFAULT_HOST)
         self.model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
 
@@ -56,11 +57,18 @@ class OllamaLLMClient(LLMClient):
             raise LLMError(f"Ollama returned HTTP {response.status_code}: {response.text}")
 
         finished_at, duration_ms = timed_since(started_monotonic)
-        return LLMResponse(
-            text=response.json().get("response", ""),
+        body = response.json()
+        # Ollama's own token counts, not billed for anything (it's local),
+        # but kept for a fair verbosity/usage comparison against Claude.
+        llm_response = LLMResponse(
+            text=body.get("response", ""),
             provider=self.provider,
             model=self.model,
             started_at=started_at,
             finished_at=finished_at,
             duration_ms=duration_ms,
+            input_tokens=body.get("prompt_eval_count"),
+            output_tokens=body.get("eval_count"),
         )
+        self._record_usage(llm_response)
+        return llm_response

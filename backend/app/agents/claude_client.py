@@ -18,6 +18,7 @@ class ClaudeLLMClient(LLMClient):
     provider = "claude"
 
     def __init__(self, api_key: str | None = None, model: str = DEFAULT_MODEL) -> None:
+        super().__init__()
         api_key = api_key or os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise LLMError("ANTHROPIC_API_KEY must be set to use the Claude client.")
@@ -40,11 +41,15 @@ class ClaudeLLMClient(LLMClient):
             raise LLMError(f"Claude API call failed: {exc}") from exc
 
         finished_at, duration_ms = timed_since(started_monotonic)
-        return LLMResponse(
+        llm_response = LLMResponse(
             text=response.content[0].text.strip(),
             provider=self.provider,
             model=self.model,
             started_at=started_at,
             finished_at=finished_at,
             duration_ms=duration_ms,
+            input_tokens=response.usage.input_tokens,
+            output_tokens=response.usage.output_tokens,
         )
+        self._record_usage(llm_response)
+        return llm_response
