@@ -2,7 +2,15 @@
 every caller needing to touch Playwright's async API directly.
 """
 
+import os
+
 from playwright.async_api import Browser, Page, async_playwright
+
+# Normally unset - Playwright auto-locates a matching browser build. Only
+# needed when the installed browser cache doesn't match the pinned
+# Playwright version exactly (e.g. a CI image or sandbox with a stale
+# cache), where plain launch() fails to find the expected executable.
+_CHROMIUM_EXECUTABLE_ENV = "PLAYWRIGHT_CHROMIUM_EXECUTABLE"
 
 
 class BrowserSession:
@@ -13,7 +21,11 @@ class BrowserSession:
 
     async def start(self) -> None:
         self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.launch(headless=True)
+        launch_kwargs: dict = {"headless": True}
+        executable_path = os.environ.get(_CHROMIUM_EXECUTABLE_ENV)
+        if executable_path:
+            launch_kwargs["executable_path"] = executable_path
+        self._browser = await self._playwright.chromium.launch(**launch_kwargs)
         self._page = await self._browser.new_page()
 
     async def goto(self, url: str) -> str:
