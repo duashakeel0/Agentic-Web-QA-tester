@@ -3,6 +3,8 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./layouts/DashboardLayout";
+import History from "./pages/History";
+import HistoryReport from "./pages/HistoryReport";
 import LoginPage from "./pages/LoginPage";
 import Overview from "./pages/Overview";
 import PlaceholderPage from "./pages/PlaceholderPage";
@@ -42,7 +44,15 @@ function App() {
             path="/history"
             element={
               <ProtectedDashboard>
-                <PlaceholderPage title="History" note="The full run history table is coming next." />
+                <History />
+              </ProtectedDashboard>
+            }
+          />
+          <Route
+            path="/history/:id"
+            element={
+              <ProtectedDashboard>
+                <HistoryReport />
               </ProtectedDashboard>
             }
           />

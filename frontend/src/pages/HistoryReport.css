@@ -1,0 +1,41 @@
+.history-report-page {
+  max-width: 1080px;
+}
+
+.history-report-back {
+  display: inline-block;
+  font-size: 13.5px;
+  color: var(--text);
+  text-decoration: none;
+  margin-bottom: 1rem;
+}
+
+.history-report-back:hover {
+  color: var(--accent);
+}
+
+.history-report-title {
+  margin: 0 0 1.25rem;
+  font-size: 26px;
+}
+
+.history-report-error {
+  color: #f31260;
+  font-size: 14px;
+}
+
+.history-report-loading {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.history-report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.history-report-comparison {
+  margin-bottom: 1.5rem;
+}

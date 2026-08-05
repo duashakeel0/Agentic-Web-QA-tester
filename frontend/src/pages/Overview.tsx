@@ -1,16 +1,8 @@
 import { useEffect, useState } from "react";
 import { apiGet, ApiError } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
+import type { HistoryStats } from "../types/history";
 import "./Overview.css";
-
-interface HistoryStats {
-  total_runs: number;
-  passed: number;
-  failed: number;
-  unmatched: number;
-  avg_duration_ms: number;
-  by_provider: Record<string, number>;
-}
 
 function Overview() {
   const { logout } = useAuth();
