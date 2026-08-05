@@ -25,13 +25,25 @@ from app.domains.manifest import load_domains
 
 MAX_ACTIONS_PER_STEP = 6
 MAX_IDENTICAL_ACTION_REPEATS = 2
+# Playwright's default actionability timeout is 30s - fine for a real,
+# slow-loading element, but ruinous for a hallucinated/invalid selector
+# (the loop guard already caps an exploration at MAX_ACTIONS_PER_STEP
+# attempts, but at the default timeout a bad step could still burn minutes
+# waiting on failures that were never going to resolve). Kept short enough
+# that a real element still has time to appear.
+ACTION_TIMEOUT_MS = 5000
+NAVIGATE_TIMEOUT_MS = 15000
+# Decisions are one short JSON object with a one-sentence reasoning field -
+# capping generation this low keeps every one of the many per-action calls
+# fast without truncating a real response.
+DECISION_MAX_TOKENS = 200
 
 _NAVIGATION_ONLY_PREFIXES = ("navigate to", "wait for")
 
 _SNAPSHOT_JS = """
 () => Array.from(document.querySelectorAll(
   'input, textarea, select, button, a[href], [role="button"]'
-)).slice(0, 40).map((el) => ({
+)).slice(0, 25).map((el) => ({
   tag: el.tagName.toLowerCase(),
   type: el.getAttribute('type'),
   id: el.id || null,
@@ -75,7 +87,10 @@ class ExplorerAgent:
 
         await self._browser.start()
         try:
-            await self._browser.page.goto(domain.base_url)
+            # BrowserSession.goto(), not page.goto() directly - it already
+            # waits on "domcontentloaded" instead of "load", which is what
+            # makes real-world sites that never cleanly fire "load" work.
+            await self._browser.goto(domain.base_url)
 
             for step in plan.steps:
                 if not broken_input_done and self._is_interactive_step(step):
@@ -130,15 +145,15 @@ class ExplorerAgent:
 
         try:
             if action == "fill":
-                await page.fill(selector, value or "")
+                await page.fill(selector, value or "", timeout=ACTION_TIMEOUT_MS)
             elif action == "click":
-                await page.click(selector)
+                await page.click(selector, timeout=ACTION_TIMEOUT_MS)
             elif action == "select":
-                await page.select_option(selector, value)
+                await page.select_option(selector, value, timeout=ACTION_TIMEOUT_MS)
             elif action == "press":
-                await page.press(selector, value or "Enter")
+                await page.press(selector, value or "Enter", timeout=ACTION_TIMEOUT_MS)
             elif action == "navigate":
-                await page.goto(value)
+                await page.goto(value, wait_until="domcontentloaded", timeout=NAVIGATE_TIMEOUT_MS)
             else:
                 return False, f"Unknown action type: {action!r}"
             return True, None
@@ -152,7 +167,7 @@ class ExplorerAgent:
 
         for _ in range(MAX_ACTIONS_PER_STEP):
             snapshot = await self._snapshot()
-            decision, _ = await self._llm.complete_json(self._step_prompt(step, snapshot))
+            decision, _ = await self._llm.complete_json(self._step_prompt(step, snapshot), max_tokens=DECISION_MAX_TOKENS)
             action = decision.get("action", "unknown")
 
             if action == "done":
@@ -186,7 +201,9 @@ class ExplorerAgent:
     async def _attempt_broken_input(self, step: str, actions: list[ActionLogEntry]) -> None:
         snapshot = await self._snapshot()
         try:
-            decision, _ = await self._llm.complete_json(self._broken_input_prompt(step, snapshot))
+            decision, _ = await self._llm.complete_json(
+                self._broken_input_prompt(step, snapshot), max_tokens=DECISION_MAX_TOKENS
+            )
         except LLMError as exc:
             actions.append(
                 ActionLogEntry(
