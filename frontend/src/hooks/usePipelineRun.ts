@@ -10,6 +10,9 @@ export interface StageState {
   status: StageStatus;
   message?: string;
   durationMs?: number;
+  startedAt?: number; // Date.now() when this stage started - lets the UI
+  // show a live elapsed-time tick for a running stage instead of a static
+  // spinner, so a genuinely slow (not frozen) call still reads as "working".
 }
 
 export type StageMap = Record<AgentName, StageState>;
@@ -94,7 +97,10 @@ export function usePipelineRun() {
         if (data.type === "stage_start") {
           setStages((prev) => ({
             ...prev,
-            [data.provider]: { ...(prev[data.provider] ?? freshStageMap()), [data.agent]: { status: "running" } },
+            [data.provider]: {
+              ...(prev[data.provider] ?? freshStageMap()),
+              [data.agent]: { status: "running", startedAt: Date.now() },
+            },
           }));
           pushFeedMessage(data.provider, data.agent, "start", `${AGENT_VERB[data.agent]}…`);
         } else if (data.type === "stage_end") {

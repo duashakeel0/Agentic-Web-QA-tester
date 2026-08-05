@@ -45,6 +45,12 @@
   opacity: 0.75;
 }
 
+.timeline-step-elapsed {
+  color: var(--status-warning, #f5a524);
+  opacity: 1;
+  font-style: italic;
+}
+
 .stage-icon {
   display: inline-flex;
   align-items: center;

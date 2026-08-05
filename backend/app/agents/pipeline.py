@@ -122,7 +122,11 @@ async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | 
         try:
             result = await awaitable
         except Exception as exc:
-            await _emit(on_event, {"type": "stage_error", "provider": provider, "agent": agent_name, "message": str(exc)})
+            # Some exceptions (asyncio.CancelledError, a bare TimeoutError
+            # raised with no args) stringify to "" - never surface that as
+            # a blank, unexplained failure in the UI.
+            message = str(exc) or f"{exc.__class__.__name__} (no further detail)"
+            await _emit(on_event, {"type": "stage_error", "provider": provider, "agent": agent_name, "message": message})
             raise
         duration_ms = (time.monotonic() - stage_start_monotonic) * 1000
         timings.append(
@@ -204,15 +208,30 @@ async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | 
 
 async def run_both(
     ticket_id: str, on_event: EventCallback | None = None
-) -> tuple[PipelineResult, PipelineResult, ComparisonReport]:
-    """Runs Claude's and Ollama's pipelines side by side and compares them.
-    Events from both providers interleave on the same callback, tagged with
-    "provider" so the dashboard can split them into two live panels."""
-    claude_result, ollama_result = await asyncio.gather(
+) -> tuple[PipelineResult | None, PipelineResult | None, ComparisonReport | None]:
+    """Runs Claude's and Ollama's pipelines side by side. Events from both
+    providers interleave on the same callback, tagged with "provider" so
+    the dashboard can split them into two live panels.
+
+    return_exceptions=True matters here: without it, the moment either
+    side raises, asyncio.gather propagates that failure immediately and
+    the *other* provider's task is abandoned mid-run - not cancelled, just
+    orphaned, still running on the server with nowhere left to report to
+    once the caller (the WebSocket handler) has already closed the
+    connection and moved on. That's what made a genuinely-still-running
+    Ollama call look permanently frozen in the UI. With this, both sides
+    always run to their own natural completion or failure."""
+    claude_outcome, ollama_outcome = await asyncio.gather(
         run_pipeline(ticket_id, "claude", on_event=on_event),
         run_pipeline(ticket_id, "ollama", on_event=on_event),
+        return_exceptions=True,
     )
-    return claude_result, ollama_result, _compare(ticket_id, claude_result, ollama_result)
+
+    claude_result = claude_outcome if isinstance(claude_outcome, PipelineResult) else None
+    ollama_result = ollama_outcome if isinstance(ollama_outcome, PipelineResult) else None
+
+    comparison = _compare(ticket_id, claude_result, ollama_result) if claude_result and ollama_result else None
+    return claude_result, ollama_result, comparison
 
 
 def _compare(ticket_id: str, claude_result: PipelineResult, ollama_result: PipelineResult) -> ComparisonReport:

@@ -7,6 +7,18 @@ one final blob.
 """
 
 import json
+import sys
+
+if sys.platform == "win32":
+    # The default SelectorEventLoop on Windows can't launch subprocesses
+    # (NotImplementedError from asyncio's _make_subprocess_transport) -
+    # Playwright launches its browser driver as a subprocess, so every
+    # browser.start() call hangs forever with no error on this loop.
+    # ProactorEventLoop is the one Windows policy that supports it, and
+    # this must run before anything else creates the event loop.
+    import asyncio
+
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -160,34 +172,52 @@ async def run_pipeline_ws(websocket: WebSocket, token: str = Depends(require_aut
 
         if model == "both":
             claude_result, ollama_result, comparison = await run_both(ticket_id, on_event=on_event)
-            comparison_group = history.new_comparison_group()
-            claude_id = await history.record_run(claude_result, comparison_group)
-            ollama_id = await history.record_run(ollama_result, comparison_group)
-            await history.record_comparison(comparison, comparison_group)
+            # Either side can come back None if it failed - run_both already
+            # let it fail on its own terms (with a real stage_error) instead
+            # of dragging the other side down with it. Only pair them under
+            # one comparison_group, and only build a comparison, when both
+            # actually succeeded.
+            comparison_group = history.new_comparison_group() if (claude_result and ollama_result) else None
 
-            await websocket.send_json(
-                {
-                    "type": "pipeline_done",
-                    "provider": "claude",
-                    "history_id": claude_id,
-                    "result": claude_result.model_dump(mode="json"),
-                }
-            )
-            await websocket.send_json(
-                {
-                    "type": "pipeline_done",
-                    "provider": "ollama",
-                    "history_id": ollama_id,
-                    "result": ollama_result.model_dump(mode="json"),
-                }
-            )
-            await websocket.send_json(
-                {
-                    "type": "comparison_done",
-                    "comparison_group": comparison_group,
-                    "comparison": comparison.model_dump(mode="json"),
-                }
-            )
+            if claude_result is not None:
+                claude_id = await history.record_run(claude_result, comparison_group)
+                await websocket.send_json(
+                    {
+                        "type": "pipeline_done",
+                        "provider": "claude",
+                        "history_id": claude_id,
+                        "result": claude_result.model_dump(mode="json"),
+                    }
+                )
+            if ollama_result is not None:
+                ollama_id = await history.record_run(ollama_result, comparison_group)
+                await websocket.send_json(
+                    {
+                        "type": "pipeline_done",
+                        "provider": "ollama",
+                        "history_id": ollama_id,
+                        "result": ollama_result.model_dump(mode="json"),
+                    }
+                )
+
+            if comparison is not None and comparison_group is not None:
+                await history.record_comparison(comparison, comparison_group)
+                await websocket.send_json(
+                    {
+                        "type": "comparison_done",
+                        "comparison_group": comparison_group,
+                        "comparison": comparison.model_dump(mode="json"),
+                    }
+                )
+            elif claude_result is None or ollama_result is None:
+                failed = "claude" if claude_result is None else "ollama"
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "provider": failed,
+                        "message": f"The {failed} run failed - see the timeline above for why. No comparison available.",
+                    }
+                )
         else:
             result = await run_pipeline(ticket_id, model, on_event=on_event)
             run_id = await history.record_run(result)

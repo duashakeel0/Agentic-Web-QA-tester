@@ -134,4 +134,4 @@ export type PipelineEvent =
   | { type: "stage_error"; provider: Provider; agent: AgentName; message: string }
   | { type: "pipeline_done"; provider: Provider; history_id: number; result: PipelineResult }
   | { type: "comparison_done"; comparison_group: string; comparison: ComparisonReport }
-  | { type: "error"; message: string };
+  | { type: "error"; provider?: Provider; message: string };

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { AgentName, Provider } from "../types/pipeline";
 import type { StageMap } from "../hooks/usePipelineRun";
 import "./PipelineTimeline.css";
@@ -19,8 +20,23 @@ function StageIcon({ status }: { status: StageMap[AgentName]["status"] }) {
   return <span className="stage-icon stage-pending">○</span>;
 }
 
+/** Ticks once a second so a running stage's elapsed time visibly counts up
+ * instead of sitting static - the difference between "still working" and
+ * "frozen" is otherwise invisible once the initial message has scrolled by. */
+function useNow(enabled: boolean) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [enabled]);
+  return now;
+}
+
 function PipelineTimeline({ stages }: { stages: Partial<Record<Provider, StageMap>> }) {
   const providers = Object.keys(stages) as Provider[];
+  const anyRunning = providers.some((p) => Object.values(stages[p] ?? {}).some((s) => s.status === "running"));
+  const now = useNow(anyRunning);
 
   return (
     <div className="pipeline-timeline">
@@ -30,12 +46,19 @@ function PipelineTimeline({ stages }: { stages: Partial<Record<Provider, StageMa
           <div className="timeline-steps">
             {AGENTS.map((agent) => {
               const stage = stages[provider]?.[agent] ?? { status: "pending" as const };
+              const elapsedSeconds =
+                stage.status === "running" && stage.startedAt ? Math.max(0, Math.round((now - stage.startedAt) / 1000)) : null;
               return (
                 <div className={`timeline-step timeline-${stage.status}`} key={agent}>
                   <StageIcon status={stage.status} />
                   <span className="timeline-step-label">{AGENT_LABELS[agent]}</span>
                   {stage.durationMs !== undefined && (
                     <span className="timeline-step-duration">{(stage.durationMs / 1000).toFixed(1)}s</span>
+                  )}
+                  {elapsedSeconds !== null && (
+                    <span className="timeline-step-duration timeline-step-elapsed">
+                      {elapsedSeconds}s{elapsedSeconds > 30 ? " - still working" : ""}
+                    </span>
                   )}
                 </div>
               );

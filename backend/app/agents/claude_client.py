@@ -12,6 +12,12 @@ from anthropic import APIError, AsyncAnthropic
 from app.agents.llm_client import LLMClient, LLMError, LLMResponse, timed_since
 
 DEFAULT_MODEL = "claude-sonnet-5"
+# Applied whenever a caller doesn't pass its own timeout. Without this, a
+# stalled network call to Claude hangs forever with zero indication - the
+# caller (or the person watching the dashboard) can't tell "still working"
+# from "dead" until this fires. 60s comfortably covers a real response;
+# anything past that is a hung connection, not a slow one.
+DEFAULT_TIMEOUT_SECONDS = 60.0
 
 
 class ClaudeLLMClient(LLMClient):
@@ -26,6 +32,7 @@ class ClaudeLLMClient(LLMClient):
         self.model = model
 
     async def complete(self, prompt: str, *, max_tokens: int = 300, timeout: float | None = None) -> LLMResponse:
+        effective_timeout = timeout if timeout is not None else DEFAULT_TIMEOUT_SECONDS
         started_at = time.time()
         started_monotonic = time.monotonic()
         call = self._client.messages.create(
@@ -34,15 +41,22 @@ class ClaudeLLMClient(LLMClient):
             messages=[{"role": "user", "content": prompt}],
         )
         try:
-            response = await (asyncio.wait_for(call, timeout=timeout) if timeout is not None else call)
+            response = await asyncio.wait_for(call, timeout=effective_timeout)
         except asyncio.TimeoutError as exc:
-            raise LLMError(f"Claude did not respond within {timeout:.0f}s.") from exc
+            raise LLMError(f"Claude did not respond within {effective_timeout:.0f}s.") from exc
         except APIError as exc:
             raise LLMError(f"Claude API call failed: {exc}") from exc
 
+        # Extended-thinking responses put a ThinkingBlock (no .text) ahead of
+        # the actual reply, so content[0] isn't reliably the text block -
+        # find the first block that actually has one instead of assuming.
+        text_block = next((block for block in response.content if hasattr(block, "text")), None)
+        if text_block is None:
+            raise LLMError("Claude's response contained no text content.")
+
         finished_at, duration_ms = timed_since(started_monotonic)
         llm_response = LLMResponse(
-            text=response.content[0].text.strip(),
+            text=text_block.text.strip(),
             provider=self.provider,
             model=self.model,
             started_at=started_at,
