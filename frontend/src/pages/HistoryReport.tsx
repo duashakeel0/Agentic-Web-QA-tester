@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import AskAboutTest from "../components/AskAboutTest";
 import ComparisonSummary from "../components/ComparisonSummary";
 import ReportCard from "../components/ReportCard";
 import { apiGet, ApiError } from "../services/api";
@@ -64,10 +65,15 @@ function HistoryReport() {
       {!entry && !error && <p className="history-report-loading">Loading…</p>}
 
       {entry && (
-        <div className="history-report-grid">
-          <ReportCard result={entry.result} />
-          {siblingResult && <ReportCard result={siblingResult} />}
-        </div>
+        <>
+          <div className="history-report-grid">
+            <ReportCard result={entry.result} />
+            {siblingResult && <ReportCard result={siblingResult} />}
+          </div>
+          <div className="history-report-ask">
+            <AskAboutTest runId={entry.id} />
+          </div>
+        </>
       )}
 
       {comparison && (

@@ -280,3 +280,49 @@ Answer in 2-4 plain sentences, no other text.
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return AskResponse(answer=response.text)
+
+
+CHAT_HISTORY_LIMIT = 12  # turns kept in the prompt, not stored server-side
+
+
+class ChatMessage(BaseModel):
+    role: str  # "user" | "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str
+    history: list[ChatMessage] = []
+
+
+class ChatResponse(BaseModel):
+    reply: str
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def chat(body: ChatRequest, _token: str = Depends(require_auth)) -> ChatResponse:
+    """A general-purpose assistant, unlike /ask which only answers from one
+    run's report - this one can talk about anything, the same way any
+    Claude chat would. Stateless on the backend; the client resends the
+    running conversation each turn."""
+    try:
+        llm = ClaudeLLMClient()
+    except LLMError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    transcript = "\n".join(f"{m.role.capitalize()}: {m.content}" for m in body.history[-CHAT_HISTORY_LIMIT:])
+    prompt = f"""You are the assistant built into SentinelQA, an AI-powered QA testing dashboard.
+You can help with anything the user asks, not only QA/testing topics - answer like a
+general-purpose, knowledgeable assistant would.
+
+{transcript}
+User: {body.message}
+
+Respond directly and conversationally, no preamble like "Sure!" or "Here's the answer:".
+"""
+    try:
+        response = await llm.complete(prompt, max_tokens=600, timeout=25)
+    except LLMError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return ChatResponse(reply=response.text)

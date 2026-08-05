@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
+import GlobalChat from "../components/GlobalChat";
 import { useAuth } from "../contexts/AuthContext";
 import { useAppTheme } from "../hooks/useAppTheme";
 import "./DashboardLayout.css";
@@ -106,6 +107,8 @@ function DashboardLayout({ children }: { children: ReactNode }) {
         </header>
         <main className="dashboard-content">{children}</main>
       </div>
+
+      <GlobalChat />
     </div>
   );
 }
