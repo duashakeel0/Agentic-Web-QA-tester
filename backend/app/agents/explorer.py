@@ -4,11 +4,12 @@ deciding each concrete browser action from the current page state rather
 than following a fixed script, so the same stored workflow keeps working
 even if a page's layout shifts slightly.
 
-Runs on a local model (Llama 3.1 via Ollama) rather than Claude: a single
+Runs on a pluggable LLMClient rather than a hardcoded provider: a single
 exploration makes one model call per browser action across every step and
-every broken-input attempt, so the call volume is high but any individual
-decision is low-stakes - if one action is slightly off, the loop guard and
-the step's action budget catch it well before it does real damage.
+every broken-input attempt, so whichever model the user picked for a run
+(Claude, Ollama, or both side by side) drives every one of those calls too -
+if one action is slightly off, the loop guard and the step's action budget
+catch it well before it does real damage.
 """
 
 import json
@@ -16,7 +17,8 @@ import json
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-from app.agents.ollama_client import OllamaClient, OllamaError
+from app.agents.claude_client import ClaudeLLMClient
+from app.agents.llm_client import LLMClient, LLMError
 from app.agents.schema import ActionLogEntry, ExplorationResult, TestPlan
 from app.browser import BrowserSession
 from app.domains.manifest import load_domains
@@ -47,9 +49,9 @@ class ExplorerError(Exception):
 
 
 class ExplorerAgent:
-    def __init__(self, browser: BrowserSession | None = None, ollama: OllamaClient | None = None) -> None:
+    def __init__(self, browser: BrowserSession | None = None, llm: LLMClient | None = None) -> None:
         self._browser = browser or BrowserSession()
-        self._ollama = ollama or OllamaClient()
+        self._llm = llm or ClaudeLLMClient()
 
     @property
     def browser(self) -> BrowserSession:
@@ -150,7 +152,7 @@ class ExplorerAgent:
 
         for _ in range(MAX_ACTIONS_PER_STEP):
             snapshot = await self._snapshot()
-            decision = await self._ollama.decide(self._step_prompt(step, snapshot))
+            decision, _ = await self._llm.complete_json(self._step_prompt(step, snapshot))
             action = decision.get("action", "unknown")
 
             if action == "done":
@@ -184,8 +186,8 @@ class ExplorerAgent:
     async def _attempt_broken_input(self, step: str, actions: list[ActionLogEntry]) -> None:
         snapshot = await self._snapshot()
         try:
-            decision = await self._ollama.decide(self._broken_input_prompt(step, snapshot))
-        except OllamaError as exc:
+            decision, _ = await self._llm.complete_json(self._broken_input_prompt(step, snapshot))
+        except LLMError as exc:
             actions.append(
                 ActionLogEntry(
                     step=step,

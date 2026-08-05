@@ -15,14 +15,14 @@ import asyncio
 import json
 import os
 
-from anthropic import APIError, AsyncAnthropic
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from app.agents.claude_client import ClaudeLLMClient
+from app.agents.llm_client import LLMClient, LLMError
 from app.agents.schema import ExplorationResult, VerifierResult
 from app.browser import BrowserSession
 
-VERIFIER_MODEL = "claude-sonnet-5"
 RECHECK_WAIT_SECONDS = 2
 RECHECK_NAV_TIMEOUT_SECONDS = 15
 LLM_TIMEOUT_SECONDS = 20
@@ -31,11 +31,14 @@ SCREENSHOT_DIR = "reports/screenshots"
 
 
 class VerifierAgent:
-    def __init__(self, anthropic_client: AsyncAnthropic | None = None, screenshot_dir: str = SCREENSHOT_DIR) -> None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        self._client = anthropic_client if anthropic_client is not None else (
-            AsyncAnthropic(api_key=api_key) if api_key else None
-        )
+    def __init__(self, llm: LLMClient | None = None, screenshot_dir: str = SCREENSHOT_DIR) -> None:
+        if llm is not None:
+            self._llm = llm
+        else:
+            try:
+                self._llm = ClaudeLLMClient()
+            except LLMError:
+                self._llm = None
         self._screenshot_dir = screenshot_dir
 
     async def verify(
@@ -166,28 +169,19 @@ class VerifierAgent:
         result: ExplorationResult,
         passed: bool,
     ) -> tuple[str | None, str]:
-        if self._client is None:
+        if self._llm is None:
             return None, "skipped"
 
         prompt = self._explanation_prompt(expected, result, passed)
         try:
-            return await self._call_with_timeout(prompt, LLM_TIMEOUT_SECONDS), "ok"
-        except (TimeoutError, APIError):
+            response = await self._llm.complete(prompt, max_tokens=200, timeout=LLM_TIMEOUT_SECONDS)
+            return response.text, "ok"
+        except LLMError:
             try:
-                return await self._call_with_timeout(prompt, LLM_RETRY_TIMEOUT_SECONDS), "ok"
-            except (TimeoutError, APIError):
+                response = await self._llm.complete(prompt, max_tokens=200, timeout=LLM_RETRY_TIMEOUT_SECONDS)
+                return response.text, "ok"
+            except LLMError:
                 return None, "inconclusive"
-
-    async def _call_with_timeout(self, prompt: str, timeout: float) -> str:
-        response = await asyncio.wait_for(
-            self._client.messages.create(
-                model=VERIFIER_MODEL,
-                max_tokens=200,
-                messages=[{"role": "user", "content": prompt}],
-            ),
-            timeout=timeout,
-        )
-        return response.content[0].text.strip()
 
     @staticmethod
     def _explanation_prompt(expected: dict, result: ExplorationResult, passed: bool) -> str:

@@ -14,15 +14,13 @@ high-severity only is escalation, not noise.
 import asyncio
 import json
 import logging
-import os
 
-from anthropic import APIError, AsyncAnthropic
-
+from app.agents.claude_client import ClaudeLLMClient
 from app.agents.email_sender import EmailError, EmailSender
+from app.agents.llm_client import LLMClient, LLMError
 from app.agents.schema import ExplorationResult, Finding, Report, RunResult, VerifierResult
 from app.mcp_server.server import post_summary
 
-REPORTER_MODEL = "claude-sonnet-5"
 CLASSIFY_TIMEOUT_SECONDS = 20
 POST_SUMMARY_MAX_ATTEMPTS = 2
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
@@ -33,13 +31,16 @@ logger = logging.getLogger(__name__)
 class ReporterAgent:
     def __init__(
         self,
-        anthropic_client: AsyncAnthropic | None = None,
+        llm: LLMClient | None = None,
         email_sender: EmailSender | None = None,
     ) -> None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        self._client = anthropic_client if anthropic_client is not None else (
-            AsyncAnthropic(api_key=api_key) if api_key else None
-        )
+        if llm is not None:
+            self._llm = llm
+        else:
+            try:
+                self._llm = ClaudeLLMClient()
+            except LLMError:
+                self._llm = None
         self._email_sender = email_sender if email_sender is not None else EmailSender()
 
     async def report(self, ticket_id: str, runs: list[RunResult]) -> Report:
@@ -94,25 +95,17 @@ class ReporterAgent:
         return steps
 
     async def _classify_with_llm(self, exploration: ExplorationResult, verification: VerifierResult) -> tuple[str, str]:
-        if self._client is None:
+        if self._llm is None:
             return "high", "Could not classify severity (no model configured) - defaulting to high severity out of caution."
 
         prompt = self._classification_prompt(exploration, verification)
         try:
-            response = await asyncio.wait_for(
-                self._client.messages.create(
-                    model=REPORTER_MODEL,
-                    max_tokens=300,
-                    messages=[{"role": "user", "content": prompt}],
-                ),
-                timeout=CLASSIFY_TIMEOUT_SECONDS,
-            )
-            data = json.loads(response.content[0].text.strip())
+            data, _ = await self._llm.complete_json(prompt, max_tokens=300, timeout=CLASSIFY_TIMEOUT_SECONDS)
             severity = data.get("severity")
             if severity not in ("high", "medium", "low"):
                 raise ValueError(f"Unexpected severity value: {severity!r}")
             return severity, data.get("summary", "")
-        except (TimeoutError, APIError, json.JSONDecodeError, ValueError):
+        except (LLMError, ValueError):
             logger.exception("Severity classification failed for ticket %s", exploration.ticket_id)
             return "high", "Could not classify severity (model call failed) - defaulting to high severity out of caution."
 
