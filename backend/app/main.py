@@ -7,11 +7,12 @@ one final blob.
 """
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.agents.pipeline import run_both, run_pipeline
+from app.auth import AuthError, login as auth_login, logout as auth_logout, require_auth, require_auth_ws
 from app.browser import BrowserSession
 from app.history.schema import ComparisonHistoryEntry, HistoryDetail, HistoryEntry, HistoryStats
 from app.history.store import HistoryStore
@@ -27,6 +28,36 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class LoginResponse(BaseModel):
+    token: str
+    username: str
+
+
+@app.post("/api/auth/login", response_model=LoginResponse)
+def api_login(body: LoginRequest) -> LoginResponse:
+    try:
+        token = auth_login(body.username, body.password)
+    except AuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+    return LoginResponse(token=token, username=body.username)
+
+
+@app.post("/api/auth/logout")
+def api_logout(token: str = Depends(require_auth)) -> dict:
+    auth_logout(token)
+    return {"status": "ok"}
+
+
+@app.get("/api/auth/me")
+def api_me(token: str = Depends(require_auth)) -> dict:
+    return {"authenticated": True}
 
 
 class TestRunResult(BaseModel):
@@ -99,11 +130,12 @@ VALID_MODELS = ("claude", "ollama", "both")
 
 
 @app.websocket("/ws/pipeline")
-async def run_pipeline_ws(websocket: WebSocket) -> None:
+async def run_pipeline_ws(websocket: WebSocket, token: str = Depends(require_auth_ws)) -> None:
     """Client sends {"ticket_id": "...", "model": "claude"|"ollama"|"both"}
     once, then receives a stream of stage_start/stage_end/stage_error events
     as the pipeline runs, followed by one pipeline_done per provider and
-    (for "both") one comparison_done."""
+    (for "both") one comparison_done. Connect as /ws/pipeline?token=<token>
+    from login - the WebSocket API can't set an Authorization header."""
     await websocket.accept()
     try:
         data = await websocket.receive_json()
@@ -171,17 +203,18 @@ async def list_history(
     search: str | None = None,
     provider: str | None = None,
     domain: str | None = None,
+    _token: str = Depends(require_auth),
 ) -> list[HistoryEntry]:
     return await history.list_runs(limit=limit, offset=offset, search=search, provider=provider, domain=domain)
 
 
 @app.get("/api/history/stats", response_model=HistoryStats)
-async def history_stats() -> HistoryStats:
+async def history_stats(_token: str = Depends(require_auth)) -> HistoryStats:
     return await history.stats()
 
 
 @app.get("/api/history/comparisons/{comparison_group}", response_model=ComparisonHistoryEntry)
-async def get_comparison(comparison_group: str) -> ComparisonHistoryEntry:
+async def get_comparison(comparison_group: str, _token: str = Depends(require_auth)) -> ComparisonHistoryEntry:
     entry = await history.get_comparison(comparison_group)
     if entry is None:
         raise HTTPException(status_code=404, detail="Comparison not found.")
@@ -189,7 +222,7 @@ async def get_comparison(comparison_group: str) -> ComparisonHistoryEntry:
 
 
 @app.get("/api/history/{run_id}", response_model=HistoryDetail)
-async def get_history_entry(run_id: int) -> HistoryDetail:
+async def get_history_entry(run_id: int, _token: str = Depends(require_auth)) -> HistoryDetail:
     entry = await history.get_run(run_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Run not found.")
