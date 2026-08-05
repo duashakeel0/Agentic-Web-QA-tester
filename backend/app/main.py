@@ -7,16 +7,19 @@ one final blob.
 """
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.agents.pipeline import run_both, run_pipeline
 from app.browser import BrowserSession
+from app.history.schema import ComparisonHistoryEntry, HistoryDetail, HistoryEntry, HistoryStats
+from app.history.store import HistoryStore
 
 load_dotenv()
 
 app = FastAPI(title="Agentic Web QA Tester")
+history = HistoryStore()
 
 app.add_middleware(
     CORSMiddleware,
@@ -121,19 +124,73 @@ async def run_pipeline_ws(websocket: WebSocket) -> None:
 
         if model == "both":
             claude_result, ollama_result, comparison = await run_both(ticket_id, on_event=on_event)
+            comparison_group = history.new_comparison_group()
+            claude_id = await history.record_run(claude_result, comparison_group)
+            ollama_id = await history.record_run(ollama_result, comparison_group)
+            await history.record_comparison(comparison, comparison_group)
+
             await websocket.send_json(
-                {"type": "pipeline_done", "provider": "claude", "result": claude_result.model_dump(mode="json")}
+                {
+                    "type": "pipeline_done",
+                    "provider": "claude",
+                    "history_id": claude_id,
+                    "result": claude_result.model_dump(mode="json"),
+                }
             )
             await websocket.send_json(
-                {"type": "pipeline_done", "provider": "ollama", "result": ollama_result.model_dump(mode="json")}
+                {
+                    "type": "pipeline_done",
+                    "provider": "ollama",
+                    "history_id": ollama_id,
+                    "result": ollama_result.model_dump(mode="json"),
+                }
             )
-            await websocket.send_json({"type": "comparison_done", "comparison": comparison.model_dump(mode="json")})
+            await websocket.send_json(
+                {
+                    "type": "comparison_done",
+                    "comparison_group": comparison_group,
+                    "comparison": comparison.model_dump(mode="json"),
+                }
+            )
         else:
             result = await run_pipeline(ticket_id, model, on_event=on_event)
+            run_id = await history.record_run(result)
             await websocket.send_json(
-                {"type": "pipeline_done", "provider": model, "result": result.model_dump(mode="json")}
+                {"type": "pipeline_done", "provider": model, "history_id": run_id, "result": result.model_dump(mode="json")}
             )
     except WebSocketDisconnect:
         pass
     except Exception as exc:
         await websocket.send_json({"type": "error", "message": str(exc)})
+
+
+@app.get("/api/history", response_model=list[HistoryEntry])
+async def list_history(
+    limit: int = 20,
+    offset: int = 0,
+    search: str | None = None,
+    provider: str | None = None,
+    domain: str | None = None,
+) -> list[HistoryEntry]:
+    return await history.list_runs(limit=limit, offset=offset, search=search, provider=provider, domain=domain)
+
+
+@app.get("/api/history/stats", response_model=HistoryStats)
+async def history_stats() -> HistoryStats:
+    return await history.stats()
+
+
+@app.get("/api/history/comparisons/{comparison_group}", response_model=ComparisonHistoryEntry)
+async def get_comparison(comparison_group: str) -> ComparisonHistoryEntry:
+    entry = await history.get_comparison(comparison_group)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Comparison not found.")
+    return entry
+
+
+@app.get("/api/history/{run_id}", response_model=HistoryDetail)
+async def get_history_entry(run_id: int) -> HistoryDetail:
+    entry = await history.get_run(run_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+    return entry
