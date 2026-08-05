@@ -1,0 +1,66 @@
+.comparison-summary {
+  background: var(--bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+}
+
+.comparison-title {
+  margin: 0 0 0.85rem;
+  font-size: 16px;
+  color: var(--text-h);
+}
+
+.comparison-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.comparison-row {
+  display: grid;
+  grid-template-columns: 1.2fr 1fr 1fr;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+  align-items: center;
+}
+
+.comparison-row:last-child {
+  border-bottom: none;
+}
+
+.comparison-head {
+  font-weight: 700;
+  color: var(--text-h);
+  font-size: 12.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.comparison-row-label {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.comparison-winner {
+  color: #17c964;
+  font-weight: 700;
+}
+
+.comparison-missed {
+  margin-top: 0.85rem;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.comparison-missed p {
+  margin: 0.25rem 0;
+}
+
+.comparison-narrative {
+  margin: 0.85rem 0 0;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--text-h);
+  white-space: pre-line;
+}

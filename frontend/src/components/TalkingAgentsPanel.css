@@ -1,0 +1,81 @@
+.talking-agents-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 1rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.talking-agents-empty {
+  color: var(--text);
+  font-size: 13.5px;
+  margin: 0;
+}
+
+.agent-bubble {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.6rem 0.85rem;
+  animation: bubble-in 0.2s ease;
+}
+
+.agent-bubble-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.2rem;
+}
+
+.agent-name {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.agent-provider {
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.agent-provider-claude {
+  border-color: rgba(170, 59, 255, 0.4);
+  color: var(--accent);
+}
+
+.agent-provider-ollama {
+  border-color: rgba(23, 201, 148, 0.4);
+  color: #17c994;
+}
+
+.agent-bubble-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--text-h);
+}
+
+.agent-bubble-error .agent-bubble-text {
+  color: #f31260;
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

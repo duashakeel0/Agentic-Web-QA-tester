@@ -6,6 +6,7 @@ import DashboardLayout from "./layouts/DashboardLayout";
 import LoginPage from "./pages/LoginPage";
 import Overview from "./pages/Overview";
 import PlaceholderPage from "./pages/PlaceholderPage";
+import RunTest from "./pages/RunTest";
 
 function ProtectedDashboard({ children }: { children: ReactNode }) {
   return (
@@ -33,10 +34,7 @@ function App() {
             path="/run"
             element={
               <ProtectedDashboard>
-                <PlaceholderPage
-                  title="Run a Test"
-                  note="Live agent workflow, ticket/URL input, and model selector are coming next."
-                />
+                <RunTest />
               </ProtectedDashboard>
             }
           />

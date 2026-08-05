@@ -1,0 +1,155 @@
+.report-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.report-pass {
+  border-color: rgba(23, 201, 100, 0.35);
+}
+
+.report-fail,
+.report-unmatched {
+  border-color: rgba(243, 18, 96, 0.35);
+}
+
+.report-header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.report-badge {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.report-badge-pass {
+  background: rgba(23, 201, 100, 0.12);
+  color: #17c964;
+}
+
+.report-badge-fail {
+  background: rgba(243, 18, 96, 0.12);
+  color: #f31260;
+}
+
+.report-provider {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.report-time {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.report-line {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-h);
+}
+
+.report-reason,
+.report-summary {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.report-findings {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.finding-block {
+  border-left: 3px solid var(--border);
+  padding: 0.4rem 0 0.4rem 0.75rem;
+}
+
+.finding-high {
+  border-left-color: #f31260;
+}
+
+.finding-medium {
+  border-left-color: #f5a524;
+}
+
+.finding-low {
+  border-left-color: var(--text);
+}
+
+.finding-severity {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text);
+}
+
+.finding-line {
+  margin: 0.15rem 0 0;
+  font-size: 13.5px;
+  color: var(--text-h);
+  line-height: 1.5;
+}
+
+.report-metrics {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  font-size: 12.5px;
+  color: var(--text);
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+}
+
+.report-trello-status {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.report-actions-toggle button {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.report-actions-toggle button:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.report-actions-list {
+  margin: 0.6rem 0 0;
+  padding-left: 1.1rem;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.7;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.action-fail {
+  color: #f31260;
+}
+
+.action-step {
+  color: var(--text);
+}

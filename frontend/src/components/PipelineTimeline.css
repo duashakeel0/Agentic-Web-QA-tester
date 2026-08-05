@@ -1,0 +1,80 @@
+.pipeline-timeline {
+  display: flex;
+  gap: 2rem;
+  flex-wrap: wrap;
+}
+
+.timeline-column {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.timeline-provider {
+  font-size: 12.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.timeline-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.timeline-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.timeline-step.timeline-done .timeline-step-label,
+.timeline-step.timeline-running .timeline-step-label {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.timeline-step-duration {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text);
+  opacity: 0.75;
+}
+
+.stage-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3em;
+}
+
+.stage-done {
+  color: #17c964;
+}
+
+.stage-error {
+  color: #f31260;
+}
+
+.stage-running {
+  color: #f5a524;
+  animation: pulse 1.2s ease-in-out infinite;
+}
+
+.stage-pending {
+  color: var(--border);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}

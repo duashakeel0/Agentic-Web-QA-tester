@@ -1,0 +1,165 @@
+.run-test-page {
+  max-width: 1080px;
+}
+
+.run-test-title {
+  margin: 0 0 0.35rem;
+  font-size: 28px;
+}
+
+.run-test-subtitle {
+  color: var(--text);
+  font-size: 14.5px;
+  margin: 0 0 1.5rem;
+}
+
+.run-test-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.run-test-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+.run-test-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text-h);
+}
+
+.run-test-field input {
+  font: inherit;
+  font-weight: 400;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-h);
+  font-size: 15px;
+}
+
+.run-test-field input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.run-test-actions {
+  display: flex;
+  gap: 0.75rem;
+}
+
+.run-test-actions button[type="submit"] {
+  padding: 0.7rem 1.75rem;
+  border-radius: 10px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.run-test-actions button[type="submit"]:disabled {
+  background: var(--border);
+  color: var(--text);
+  cursor: not-allowed;
+}
+
+.run-test-reset {
+  padding: 0.7rem 1.25rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.run-test-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.status-connecting,
+.status-running {
+  background: #f5a524;
+  box-shadow: 0 0 0 4px rgba(245, 165, 36, 0.2);
+}
+
+.status-done {
+  background: #17c964;
+  box-shadow: 0 0 0 4px rgba(23, 201, 100, 0.2);
+}
+
+.status-error {
+  background: #f31260;
+  box-shadow: 0 0 0 4px rgba(243, 18, 96, 0.2);
+}
+
+.run-test-error {
+  margin-top: 1rem;
+  border: 1px solid rgba(243, 18, 96, 0.35);
+  background: rgba(243, 18, 96, 0.08);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  color: #f31260;
+  font-size: 13.5px;
+}
+
+.run-test-section-title {
+  font-size: 15px;
+  margin: 0 0 0.75rem;
+  color: var(--text-h);
+}
+
+.run-test-live {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.run-test-live-column-wide {
+  min-width: 0;
+}
+
+.run-test-reports {
+  margin-bottom: 1.5rem;
+}
+
+.run-test-report-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.run-test-comparison {
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 720px) {
+  .run-test-live {
+    grid-template-columns: 1fr;
+  }
+}
