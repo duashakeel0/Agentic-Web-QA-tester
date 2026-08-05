@@ -55,6 +55,26 @@
   color: var(--text);
 }
 
+.report-download-btn {
+  background: none;
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12.5px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.report-download-btn:hover {
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.report-download-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .report-line {
   margin: 0;
   font-size: 14px;

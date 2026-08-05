@@ -110,3 +110,22 @@ def test_history_routes_require_auth(client):
     assert client.get("/api/history/provider-stats").status_code == 401
     assert client.get("/api/history/daily").status_code == 401
     assert client.get("/api/history/1").status_code == 401
+
+
+async def test_report_pdf_download(client, auth_headers, app_history):
+    run_id = await app_history.record_run(_result("T1", "claude", "fail"))
+
+    response = client.get(f"/api/history/{run_id}/report.pdf", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content.startswith(b"%PDF")
+
+
+def test_report_pdf_404_when_missing(client, auth_headers):
+    response = client.get("/api/history/999/report.pdf", headers=auth_headers)
+    assert response.status_code == 404
+
+
+def test_report_pdf_requires_auth(client):
+    assert client.get("/api/history/1/report.pdf").status_code == 401

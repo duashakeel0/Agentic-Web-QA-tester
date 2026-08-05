@@ -1,10 +1,33 @@
 import { useState } from "react";
+import { downloadFile } from "../services/api";
 import type { PipelineResult, Provider } from "../types/pipeline";
 import "./ReportCard.css";
 
 const PROVIDER_LABELS: Record<Provider, string> = { claude: "Claude", ollama: "Llama (Ollama)" };
 
-function ReportCard({ result }: { result: PipelineResult }) {
+function DownloadReportButton({ historyId, ticketId }: { historyId: number; ticketId: string }) {
+  const [downloading, setDownloading] = useState(false);
+
+  return (
+    <button
+      type="button"
+      className="report-download-btn"
+      disabled={downloading}
+      onClick={async () => {
+        setDownloading(true);
+        try {
+          await downloadFile(`/api/history/${historyId}/report.pdf`, `sentinelqa-report-${ticketId}-${historyId}.pdf`);
+        } finally {
+          setDownloading(false);
+        }
+      }}
+    >
+      {downloading ? "Preparing…" : "⬇ Download Report"}
+    </button>
+  );
+}
+
+function ReportCard({ result, historyId }: { result: PipelineResult; historyId?: number }) {
   const [showActions, setShowActions] = useState(false);
   const { plan, exploration, verification, report, metrics } = result;
 
@@ -33,6 +56,7 @@ function ReportCard({ result }: { result: PipelineResult }) {
         </span>
         <span className="report-provider">{PROVIDER_LABELS[result.provider]}</span>
         <span className="report-time">{(result.total_duration_ms / 1000).toFixed(1)}s total</span>
+        {historyId !== undefined && <DownloadReportButton historyId={historyId} ticketId={result.ticket_id} />}
       </div>
 
       <p className="report-line">

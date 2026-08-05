@@ -189,7 +189,7 @@ function Dashboard() {
               <h2 className="dash-panel-title">Report{resultList.length > 1 ? "s" : ""}</h2>
               <div className="dash-report-grid">
                 {resultList.map((result) => (
-                  <ReportCard result={result} key={result.provider} />
+                  <ReportCard result={result} historyId={historyIds[result.provider]} key={result.provider} />
                 ))}
               </div>
               {primaryHistoryId && <AskAboutTest runId={primaryHistoryId} />}

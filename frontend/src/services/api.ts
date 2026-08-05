@@ -44,6 +44,20 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
+/** Downloads a binary response (e.g. the PDF report) through the same
+ * authenticated fetch every other call uses, then hands the browser a
+ * blob URL to save - a plain <a href> can't carry the auth header. */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const response = await apiFetch(path);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export function getPipelineSocketUrl(): string {
   const token = tokenStorage.getToken();
   const base = API_BASE_URL.replace(/^http/, "ws");

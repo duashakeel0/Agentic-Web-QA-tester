@@ -14,6 +14,7 @@ function HistoryReport() {
   const { logout } = useAuth();
   const [entry, setEntry] = useState<HistoryDetail | null>(null);
   const [siblingResult, setSiblingResult] = useState<PipelineResult | null>(null);
+  const [siblingId, setSiblingId] = useState<number | null>(null);
   const [comparison, setComparison] = useState<ComparisonHistoryEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,7 +37,10 @@ function HistoryReport() {
           const sibling = siblingRuns.find((r) => r.comparison_group === data.comparison_group && r.id !== data.id);
           if (sibling) {
             const siblingDetail = await apiGet<HistoryDetail>(`/api/history/${sibling.id}`).catch(() => null);
-            if (!cancelled && siblingDetail) setSiblingResult(siblingDetail.result);
+            if (!cancelled && siblingDetail) {
+              setSiblingResult(siblingDetail.result);
+              setSiblingId(siblingDetail.id);
+            }
           }
         }
       })
@@ -67,8 +71,8 @@ function HistoryReport() {
       {entry && (
         <>
           <div className="history-report-grid">
-            <ReportCard result={entry.result} />
-            {siblingResult && <ReportCard result={siblingResult} />}
+            <ReportCard result={entry.result} historyId={entry.id} />
+            {siblingResult && <ReportCard result={siblingResult} historyId={siblingId ?? undefined} />}
           </div>
           <div className="history-report-ask">
             <AskAboutTest runId={entry.id} />

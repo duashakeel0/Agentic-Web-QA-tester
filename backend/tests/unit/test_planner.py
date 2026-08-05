@@ -33,7 +33,12 @@ async def test_plan_end_to_end_matched(monkeypatch, planner):
     assert plan.matched is True
     assert plan.domain == "sauce_demo"
     assert plan.workflow == "login"
-    assert plan.steps == ["Navigate to saucedemo.com", "Enter a valid username and password", "Click the Login button"]
+    assert plan.steps == [
+        "Navigate to saucedemo.com",
+        'Enter "standard_user" into the Username field',
+        'Enter "secret_sauce" into the Password field',
+        "Click the Login button",
+    ]
     assert plan.expected_outcome == {"url_contains": "/inventory.html", "text_contains": "Products"}
 
 

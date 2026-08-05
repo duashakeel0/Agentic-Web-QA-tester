@@ -164,10 +164,13 @@ class ExplorerAgent:
 
     async def _execute_step(self, step: str, actions: list[ActionLogEntry]) -> None:
         seen_signatures: dict[tuple, int] = {}
+        step_actions: list[ActionLogEntry] = []
 
         for _ in range(MAX_ACTIONS_PER_STEP):
             snapshot = await self._snapshot()
-            decision, _ = await self._llm.complete_json(self._step_prompt(step, snapshot), max_tokens=DECISION_MAX_TOKENS)
+            decision, _ = await self._llm.complete_json(
+                self._step_prompt(step, snapshot, step_actions), max_tokens=DECISION_MAX_TOKENS
+            )
             action = decision.get("action", "unknown")
 
             if action == "done":
@@ -184,17 +187,17 @@ class ExplorerAgent:
                 )
 
             success, error = await self._execute_action(action, selector, value)
-            actions.append(
-                ActionLogEntry(
-                    step=step,
-                    action=action,
-                    selector=selector,
-                    value=value,
-                    reasoning=decision.get("reasoning"),
-                    success=success,
-                    error=error,
-                )
+            entry = ActionLogEntry(
+                step=step,
+                action=action,
+                selector=selector,
+                value=value,
+                reasoning=decision.get("reasoning"),
+                success=success,
+                error=error,
             )
+            actions.append(entry)
+            step_actions.append(entry)
 
         raise ExplorerError(f"Explorer could not complete step {step!r} within {MAX_ACTIONS_PER_STEP} actions.")
 
@@ -233,13 +236,26 @@ class ExplorerAgent:
             )
         )
 
-    def _step_prompt(self, step: str, snapshot: dict) -> str:
+    def _step_prompt(self, step: str, snapshot: dict, step_actions: list[ActionLogEntry]) -> str:
+        history = ""
+        if step_actions:
+            done_list = "\n".join(
+                f'- {a.action} on {a.selector!r} with {a.value!r} -> {"succeeded" if a.success else f"FAILED: {a.error}"}'
+                for a in step_actions
+            )
+            history = f"""
+Actions already taken THIS step, in order - do not repeat one that already
+succeeded, the field/element is already in that state even if it's not
+obviously reflected below:
+{done_list}
+"""
+
         return f"""You are driving a real browser through one step of a QA workflow.
 This step is a human-written skeleton, not a fixed script - you must find and
 use the real elements on the current page to carry it out.
 
 Step: "{step}"
-
+{history}
 Current page:
 URL: {snapshot["url"]}
 Title: {snapshot["title"]}

@@ -21,7 +21,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -32,6 +32,7 @@ from app.auth import AuthError, login as auth_login, logout as auth_logout, requ
 from app.browser import BrowserSession
 from app.history.schema import ComparisonHistoryEntry, DailyStat, HistoryDetail, HistoryEntry, HistoryStats, ProviderStats
 from app.history.store import HistoryStore
+from app.pdf_report import generate_report_pdf
 
 load_dotenv()
 
@@ -271,6 +272,24 @@ async def get_history_entry(run_id: int, _token: str = Depends(require_auth)) ->
     if entry is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     return entry
+
+
+@app.get("/api/history/{run_id}/report.pdf")
+async def get_history_report_pdf(run_id: int, _token: str = Depends(require_auth)) -> Response:
+    """A downloadable, standalone version of one run's report - timestamps,
+    metrics charts and tables, findings, plus a short Claude-written
+    narrative - for handing to someone who wasn't watching the dashboard."""
+    entry = await history.get_run(run_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+
+    pdf_bytes = await generate_report_pdf(entry)
+    filename = f"sentinelqa-report-{entry.ticket_id}-{run_id}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 class AskRequest(BaseModel):
