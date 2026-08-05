@@ -12,7 +12,7 @@ PipelineResult, and the comparison between them.
 
 import asyncio
 import time
-from collections.abc import Coroutine
+from collections.abc import Awaitable, Callable, Coroutine
 from typing import TypeVar
 
 from app.agents.claude_client import ClaudeLLMClient
@@ -26,6 +26,12 @@ from app.agents.verifier import VerifierAgent
 
 T = TypeVar("T")
 
+# Called with one event dict per pipeline stage transition, e.g.
+# {"type": "stage_start", "provider": "claude", "agent": "planner"} - the
+# WebSocket layer forwards these straight to the client so the dashboard can
+# show a live "talking agents" panel instead of one final blob at the end.
+EventCallback = Callable[[dict], Awaitable[None]]
+
 
 def make_llm(provider: str) -> LLMClient:
     if provider == "claude":
@@ -35,16 +41,47 @@ def make_llm(provider: str) -> LLMClient:
     raise ValueError(f"Unknown model provider: {provider!r} - expected 'claude' or 'ollama'.")
 
 
-async def run_pipeline(ticket_id: str, provider: str) -> PipelineResult:
+async def _emit(on_event: EventCallback | None, event: dict) -> None:
+    if on_event is not None:
+        await on_event(event)
+
+
+def _narrate(agent_name: str, result) -> str:
+    """One human-readable sentence per finished stage - what the "talking
+    agents" panel actually shows instead of raw JSON."""
+    if agent_name == "planner":
+        if not result.matched:
+            return f"No registered domain matched this ticket: {result.reason}"
+        return f"Matched to {result.domain}/{result.workflow} - plan has {len(result.steps)} step(s)."
+    if agent_name == "explorer":
+        if not result.completed:
+            return f"Exploration stopped early: {result.error}"
+        return f"Completed the workflow in {len(result.actions)} action(s)."
+    if agent_name == "verifier":
+        suffix = f" {result.explanation}" if result.explanation else ""
+        return f"Verdict: {result.verdict.upper()}.{suffix}"
+    if agent_name == "reporter":
+        count = len(result.findings)
+        return f"Report ready - {count} confirmed finding(s)." if count else "Report ready - no confirmed findings."
+    return ""
+
+
+async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | None = None) -> PipelineResult:
     """Runs the full pipeline with every agent on the same provider."""
     llm = make_llm(provider)
     timings: list[StepTiming] = []
     started_at = time.time()
 
     async def timed(agent_name: str, awaitable: Coroutine[None, None, T]) -> T:
+        await _emit(on_event, {"type": "stage_start", "provider": provider, "agent": agent_name})
         stage_start_wall = time.time()
         stage_start_monotonic = time.monotonic()
-        result = await awaitable
+        try:
+            result = await awaitable
+        except Exception as exc:
+            await _emit(on_event, {"type": "stage_error", "provider": provider, "agent": agent_name, "message": str(exc)})
+            raise
+        duration_ms = (time.monotonic() - stage_start_monotonic) * 1000
         timings.append(
             StepTiming(
                 agent=agent_name,
@@ -52,8 +89,18 @@ async def run_pipeline(ticket_id: str, provider: str) -> PipelineResult:
                 model=llm.model,
                 started_at=stage_start_wall,
                 finished_at=time.time(),
-                duration_ms=(time.monotonic() - stage_start_monotonic) * 1000,
+                duration_ms=duration_ms,
             )
+        )
+        await _emit(
+            on_event,
+            {
+                "type": "stage_end",
+                "provider": provider,
+                "agent": agent_name,
+                "duration_ms": duration_ms,
+                "message": _narrate(agent_name, result),
+            },
         )
         return result
 
@@ -110,11 +157,15 @@ async def run_pipeline(ticket_id: str, provider: str) -> PipelineResult:
     )
 
 
-async def run_both(ticket_id: str) -> tuple[PipelineResult, PipelineResult, ComparisonReport]:
-    """Runs Claude's and Ollama's pipelines side by side and compares them."""
+async def run_both(
+    ticket_id: str, on_event: EventCallback | None = None
+) -> tuple[PipelineResult, PipelineResult, ComparisonReport]:
+    """Runs Claude's and Ollama's pipelines side by side and compares them.
+    Events from both providers interleave on the same callback, tagged with
+    "provider" so the dashboard can split them into two live panels."""
     claude_result, ollama_result = await asyncio.gather(
-        run_pipeline(ticket_id, "claude"),
-        run_pipeline(ticket_id, "ollama"),
+        run_pipeline(ticket_id, "claude", on_event=on_event),
+        run_pipeline(ticket_id, "ollama", on_event=on_event),
     )
     return claude_result, ollama_result, _compare(ticket_id, claude_result, ollama_result)
 

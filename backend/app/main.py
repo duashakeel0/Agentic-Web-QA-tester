@@ -1,13 +1,20 @@
-"""Day 1 scaffolded the pipeline with mock data. Day 2 adds a real browser
-driver (Playwright) behind a WebSocket, so the dashboard gets live status
-updates as an actual page loads instead of one static fetch.
+"""Day 1 scaffolded the pipeline with mock data. Day 2 added a real browser
+driver behind a WebSocket for one-off page loads. /ws/pipeline is the real
+thing: it drives the full Planner -> Explorer -> Verifier -> Reporter
+pipeline against a Trello ticket, with a model choice (Claude, Ollama, or
+both side by side), streaming each agent's status live instead of returning
+one final blob.
 """
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from app.agents.pipeline import run_both, run_pipeline
 from app.browser import BrowserSession
+
+load_dotenv()
 
 app = FastAPI(title="Agentic Web QA Tester")
 
@@ -83,3 +90,50 @@ async def run_live_test(websocket: WebSocket) -> None:
         await websocket.send_json({"type": "error", "message": str(exc)})
     finally:
         await session.close()
+
+
+VALID_MODELS = ("claude", "ollama", "both")
+
+
+@app.websocket("/ws/pipeline")
+async def run_pipeline_ws(websocket: WebSocket) -> None:
+    """Client sends {"ticket_id": "...", "model": "claude"|"ollama"|"both"}
+    once, then receives a stream of stage_start/stage_end/stage_error events
+    as the pipeline runs, followed by one pipeline_done per provider and
+    (for "both") one comparison_done."""
+    await websocket.accept()
+    try:
+        data = await websocket.receive_json()
+        ticket_id = data.get("ticket_id")
+        model = data.get("model", "claude")
+
+        if not ticket_id:
+            await websocket.send_json({"type": "error", "message": "No ticket_id provided."})
+            return
+        if model not in VALID_MODELS:
+            await websocket.send_json(
+                {"type": "error", "message": f"Unknown model {model!r} - expected claude, ollama, or both."}
+            )
+            return
+
+        async def on_event(event: dict) -> None:
+            await websocket.send_json(event)
+
+        if model == "both":
+            claude_result, ollama_result, comparison = await run_both(ticket_id, on_event=on_event)
+            await websocket.send_json(
+                {"type": "pipeline_done", "provider": "claude", "result": claude_result.model_dump(mode="json")}
+            )
+            await websocket.send_json(
+                {"type": "pipeline_done", "provider": "ollama", "result": ollama_result.model_dump(mode="json")}
+            )
+            await websocket.send_json({"type": "comparison_done", "comparison": comparison.model_dump(mode="json")})
+        else:
+            result = await run_pipeline(ticket_id, model, on_event=on_event)
+            await websocket.send_json(
+                {"type": "pipeline_done", "provider": model, "result": result.model_dump(mode="json")}
+            )
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        await websocket.send_json({"type": "error", "message": str(exc)})
