@@ -46,6 +46,7 @@ export function usePipelineRun() {
   const [feed, setFeed] = useState<FeedMessage[]>([]);
   const [stages, setStages] = useState<Partial<Record<Provider, StageMap>>>({});
   const [results, setResults] = useState<Partial<Record<Provider, PipelineResult>>>({});
+  const [historyIds, setHistoryIds] = useState<Partial<Record<Provider, number>>>({});
   const [comparison, setComparison] = useState<ComparisonReport | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
@@ -57,6 +58,7 @@ export function usePipelineRun() {
     setFeed([]);
     setStages({});
     setResults({});
+    setHistoryIds({});
     setComparison(null);
     setErrorMessage(null);
   }, []);
@@ -71,6 +73,7 @@ export function usePipelineRun() {
       setStatus("connecting");
       setFeed([]);
       setResults({});
+      setHistoryIds({});
       setComparison(null);
       setErrorMessage(null);
 
@@ -114,6 +117,7 @@ export function usePipelineRun() {
           pushFeedMessage(data.provider, data.agent, "error", data.message);
         } else if (data.type === "pipeline_done") {
           setResults((prev) => ({ ...prev, [data.provider]: data.result }));
+          setHistoryIds((prev) => ({ ...prev, [data.provider]: data.history_id }));
         } else if (data.type === "comparison_done") {
           setComparison(data.comparison);
           setStatus("done");
@@ -135,5 +139,5 @@ export function usePipelineRun() {
     [pushFeedMessage],
   );
 
-  return { status, feed, stages, results, comparison, errorMessage, start, reset, AGENTS };
+  return { status, feed, stages, results, historyIds, comparison, errorMessage, start, reset, AGENTS };
 }

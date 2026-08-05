@@ -3,11 +3,12 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./layouts/DashboardLayout";
+import Analytics from "./pages/Analytics";
+import Compare from "./pages/Compare";
+import Dashboard from "./pages/Dashboard";
 import History from "./pages/History";
 import HistoryReport from "./pages/HistoryReport";
 import LoginPage from "./pages/LoginPage";
-import Overview from "./pages/Overview";
-import PlaceholderPage from "./pages/PlaceholderPage";
 import RunTest from "./pages/RunTest";
 
 function ProtectedDashboard({ children }: { children: ReactNode }) {
@@ -28,7 +29,7 @@ function App() {
             path="/"
             element={
               <ProtectedDashboard>
-                <Overview />
+                <Dashboard />
               </ProtectedDashboard>
             }
           />
@@ -60,10 +61,7 @@ function App() {
             path="/compare"
             element={
               <ProtectedDashboard>
-                <PlaceholderPage
-                  title="Model Comparison"
-                  note="Claude vs Ollama cost/latency/coverage/accuracy view is coming next."
-                />
+                <Compare />
               </ProtectedDashboard>
             }
           />
@@ -71,7 +69,7 @@ function App() {
             path="/analytics"
             element={
               <ProtectedDashboard>
-                <PlaceholderPage title="Analytics" note="Charts for trends over time are coming next." />
+                <Analytics />
               </ProtectedDashboard>
             }
           />

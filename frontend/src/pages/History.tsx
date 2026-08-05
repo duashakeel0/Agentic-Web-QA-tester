@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { apiGet, ApiError } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import type { HistoryEntry } from "../types/history";
@@ -16,8 +16,10 @@ function formatDate(unixSeconds: number): string {
 
 function History() {
   const { logout } = useAuth();
+  const [searchParams] = useSearchParams();
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
-  const [search, setSearch] = useState("");
+  const [searchInput, setSearchInput] = useState(() => searchParams.get("search") ?? "");
+  const [committedSearch, setCommittedSearch] = useState(() => searchParams.get("search") ?? "");
   const [provider, setProvider] = useState<"" | "claude" | "ollama">("");
   const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -47,15 +49,26 @@ function History() {
     [logout],
   );
 
+  // Picks up a search term arriving from outside this page (the topbar
+  // search bar navigates here with ?search=...) even if History is already
+  // mounted, not just on first load.
   useEffect(() => {
-    load(offset, search, provider);
+    const urlSearch = searchParams.get("search") ?? "";
+    setSearchInput(urlSearch);
+    setCommittedSearch(urlSearch);
+    setOffset(0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset, provider]);
+  }, [searchParams.toString()]);
+
+  useEffect(() => {
+    load(offset, committedSearch, provider);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offset, provider, committedSearch]);
 
   function handleSearchSubmit(event: FormEvent) {
     event.preventDefault();
     setOffset(0);
-    load(0, search, provider);
+    setCommittedSearch(searchInput);
   }
 
   return (
@@ -67,8 +80,8 @@ function History() {
         <input
           type="text"
           placeholder="Search by ticket ID or website…"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
+          value={searchInput}
+          onChange={(event) => setSearchInput(event.target.value)}
         />
         <select
           value={provider}

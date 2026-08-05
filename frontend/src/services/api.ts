@@ -35,6 +35,15 @@ export async function apiGet<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+export async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const response = await apiFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return (await response.json()) as T;
+}
+
 export function getPipelineSocketUrl(): string {
   const token = tokenStorage.getToken();
   const base = API_BASE_URL.replace(/^http/, "ws");

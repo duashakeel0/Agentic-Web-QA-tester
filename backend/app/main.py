@@ -6,20 +6,24 @@ both side by side), streaming each agent's status live instead of returning
 one final blob.
 """
 
+import json
+
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from app.agents.claude_client import ClaudeLLMClient
+from app.agents.llm_client import LLMError
 from app.agents.pipeline import run_both, run_pipeline
 from app.auth import AuthError, login as auth_login, logout as auth_logout, require_auth, require_auth_ws
 from app.browser import BrowserSession
-from app.history.schema import ComparisonHistoryEntry, HistoryDetail, HistoryEntry, HistoryStats
+from app.history.schema import ComparisonHistoryEntry, DailyStat, HistoryDetail, HistoryEntry, HistoryStats, ProviderStats
 from app.history.store import HistoryStore
 
 load_dotenv()
 
-app = FastAPI(title="Agentic Web QA Tester")
+app = FastAPI(title="SentinelQA")
 history = HistoryStore()
 
 app.add_middleware(
@@ -221,9 +225,58 @@ async def get_comparison(comparison_group: str, _token: str = Depends(require_au
     return entry
 
 
+@app.get("/api/history/provider-stats", response_model=list[ProviderStats])
+async def provider_stats(_token: str = Depends(require_auth)) -> list[ProviderStats]:
+    return await history.provider_stats()
+
+
+@app.get("/api/history/daily", response_model=list[DailyStat])
+async def daily_stats(days: int = 7, _token: str = Depends(require_auth)) -> list[DailyStat]:
+    return await history.daily_stats(days=days)
+
+
 @app.get("/api/history/{run_id}", response_model=HistoryDetail)
 async def get_history_entry(run_id: int, _token: str = Depends(require_auth)) -> HistoryDetail:
     entry = await history.get_run(run_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Run not found.")
     return entry
+
+
+class AskRequest(BaseModel):
+    question: str
+
+
+class AskResponse(BaseModel):
+    answer: str
+
+
+@app.post("/api/history/{run_id}/ask", response_model=AskResponse)
+async def ask_about_report(run_id: int, body: AskRequest, _token: str = Depends(require_auth)) -> AskResponse:
+    """Answers a free-form question about one run, grounded in its actual
+    stored report - not a general chat, so it can't answer anything the
+    report itself doesn't contain."""
+    entry = await history.get_run(run_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Run not found.")
+
+    try:
+        llm = ClaudeLLMClient()
+    except LLMError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    prompt = f"""You are answering a question about one QA test run, using ONLY the data
+below - if the answer isn't in this data, say so plainly instead of guessing.
+
+Run data (JSON): {json.dumps(entry.result)[:6000]}
+
+Question: {body.question}
+
+Answer in 2-4 plain sentences, no other text.
+"""
+    try:
+        response = await llm.complete(prompt, max_tokens=300, timeout=20)
+    except LLMError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return AskResponse(answer=response.text)

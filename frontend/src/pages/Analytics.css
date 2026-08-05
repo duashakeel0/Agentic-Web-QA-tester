@@ -1,0 +1,88 @@
+.analytics-page {
+  max-width: 1080px;
+}
+
+.analytics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+
+.analytics-title {
+  margin: 0 0 0.35rem;
+  font-size: 28px;
+}
+
+.analytics-subtitle {
+  color: var(--text);
+  font-size: 14.5px;
+  margin: 0;
+}
+
+.analytics-range {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.analytics-range button {
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.analytics-range button.active {
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.analytics-error {
+  color: var(--status-critical);
+  font-size: 14px;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.25rem;
+}
+
+.analytics-panel {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 1.25rem 1.5rem;
+}
+
+.analytics-panel-wide {
+  grid-column: 1 / -1;
+}
+
+.analytics-panel h3 {
+  margin: 0 0 1rem;
+  font-size: 13.5px;
+  color: var(--text-h);
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.analytics-note {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text);
+}
+
+@media (max-width: 780px) {
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+}

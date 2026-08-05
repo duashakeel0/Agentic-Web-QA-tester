@@ -34,7 +34,7 @@ function LoginPage() {
   return (
     <div className="login-page app-shell-full-bleed">
       <div className="login-card">
-        <span className="login-eyebrow">Agentic Web QA Tester</span>
+        <span className="login-eyebrow">🛡️ SentinelQA</span>
         <h1 className="login-greeting">Welcome back.</h1>
         <p className="login-subtitle">Sign in to run your AI QA agents and see your latest reports.</p>
 

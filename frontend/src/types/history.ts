@@ -10,6 +10,7 @@ export interface HistoryEntry {
   verdict: "pass" | "fail" | null;
   findings_count: number;
   total_duration_ms: number;
+  estimated_cost_usd: number;
   started_at: number;
   finished_at: number;
   comparison_group: string | null;
@@ -33,5 +34,33 @@ export interface HistoryStats {
   failed: number;
   unmatched: number;
   avg_duration_ms: number;
+  total_cost_usd: number;
   by_provider: Record<string, number>;
+}
+
+export interface MissedStepCount {
+  step: string;
+  count: number;
+}
+
+export interface ProviderStats {
+  provider: Provider;
+  run_count: number;
+  pass_count: number;
+  fail_count: number;
+  avg_duration_ms: number;
+  avg_coverage_ratio: number;
+  avg_accuracy_ratio: number;
+  avg_cost_usd: number;
+  total_cost_usd: number;
+  common_missed_steps: MissedStepCount[];
+}
+
+export interface DailyStat {
+  date: string;
+  total: number;
+  passed: number;
+  failed: number;
+  total_cost_usd: number;
+  avg_duration_ms: number;
 }

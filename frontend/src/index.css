@@ -71,6 +71,50 @@
   text-align: left;
 }
 
+/* SentinelQA app theme - defaults to dark (its own deliberate product look,
+   not the OS-driven light/dark of the landing page above). Reuses the same
+   token names as :root so every component built against
+   var(--bg)/var(--text)/etc. re-themes automatically; only the values
+   differ inside .app-shell-full-bleed (the dashboard shell and the login
+   page both carry this class already, for the width override above), plus
+   the chart-specific tokens which didn't exist before. A real toggle flips
+   [data-app-theme="light"]. */
+.app-shell-full-bleed {
+  --bg: #0a0a12;
+  --code-bg: #13131f;
+  --border: #26263a;
+  --text: #9b9ab0;
+  --text-h: #f5f5fa;
+  --accent: #8b5cf6;
+  --accent-bg: rgba(139, 92, 246, 0.15);
+  --accent-border: rgba(139, 92, 246, 0.45);
+  --shadow: rgba(0, 0, 0, 0.5) 0 10px 30px -5px;
+  --surface-2: #191927;
+  --claude-color: #9085e9;
+  --ollama-color: #199e70;
+  --status-good: #0ca30c;
+  --status-critical: #d03b3b;
+  --status-warning: #fab219;
+}
+
+[data-app-theme="light"] .app-shell-full-bleed {
+  --bg: #f7f7fb;
+  --code-bg: #f1f0f7;
+  --border: #e5e4ef;
+  --text: #6b6375;
+  --text-h: #08060d;
+  --accent: #7c3aed;
+  --accent-bg: rgba(124, 58, 237, 0.1);
+  --accent-border: rgba(124, 58, 237, 0.4);
+  --shadow: rgba(0, 0, 0, 0.08) 0 10px 15px -3px;
+  --surface-2: #ffffff;
+  --claude-color: #4a3aa7;
+  --ollama-color: #1baf7a;
+  --status-good: #0ca30c;
+  --status-critical: #d03b3b;
+  --status-warning: #fab219;
+}
+
 body {
   margin: 0;
 }

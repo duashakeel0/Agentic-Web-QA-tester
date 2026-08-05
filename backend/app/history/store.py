@@ -14,10 +14,19 @@ import os
 import sqlite3
 import time
 import uuid
+from collections import Counter
 from contextlib import contextmanager
 
 from app.agents.schema import ComparisonReport, PipelineResult
-from app.history.schema import ComparisonHistoryEntry, HistoryDetail, HistoryEntry, HistoryStats
+from app.history.schema import (
+    ComparisonHistoryEntry,
+    DailyStat,
+    HistoryDetail,
+    HistoryEntry,
+    HistoryStats,
+    MissedStepCount,
+    ProviderStats,
+)
 
 DEFAULT_DB_PATH = "data/history.db"
 
@@ -32,6 +41,7 @@ CREATE TABLE IF NOT EXISTS runs (
     verdict TEXT,
     findings_count INTEGER NOT NULL DEFAULT 0,
     total_duration_ms REAL NOT NULL,
+    estimated_cost_usd REAL NOT NULL DEFAULT 0.0,
     started_at REAL NOT NULL,
     finished_at REAL NOT NULL,
     comparison_group TEXT,
@@ -56,6 +66,15 @@ class HistoryStore:
             os.makedirs(directory, exist_ok=True)
         with self._connect() as conn:
             conn.executescript(_SCHEMA)
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """A database created before estimated_cost_usd existed needs the
+        column added - CREATE TABLE IF NOT EXISTS only helps fresh files."""
+        existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+        if "estimated_cost_usd" not in existing_columns:
+            conn.execute("ALTER TABLE runs ADD COLUMN estimated_cost_usd REAL NOT NULL DEFAULT 0.0")
 
     @contextmanager
     def _connect(self):
@@ -73,15 +92,17 @@ class HistoryStore:
     def _record_run_sync(self, result: PipelineResult, comparison_group: str | None) -> int:
         verdict = result.verification.verdict if result.verification else None
         findings_count = len(result.report.findings) if result.report else 0
+        cost = result.metrics.estimated_cost_usd if result.metrics else 0.0
         with self._connect() as conn:
             cursor = conn.execute(
                 """INSERT INTO runs (
                     ticket_id, domain, workflow, provider, matched, verdict, findings_count,
-                    total_duration_ms, started_at, finished_at, comparison_group, result_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    total_duration_ms, estimated_cost_usd, started_at, finished_at, comparison_group,
+                    result_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     result.ticket_id, result.plan.domain, result.plan.workflow, result.provider,
-                    int(result.plan.matched), verdict, findings_count, result.total_duration_ms,
+                    int(result.plan.matched), verdict, findings_count, result.total_duration_ms, cost,
                     result.started_at, result.finished_at, comparison_group,
                     result.model_dump_json(), time.time(),
                 ),
@@ -128,7 +149,7 @@ class HistoryStore:
             conn.row_factory = sqlite3.Row
             rows = conn.execute(
                 f"""SELECT id, ticket_id, domain, workflow, provider, matched, verdict, findings_count,
-                    total_duration_ms, started_at, finished_at, comparison_group, created_at
+                    total_duration_ms, estimated_cost_usd, started_at, finished_at, comparison_group, created_at
                 FROM runs {where} ORDER BY id DESC LIMIT ? OFFSET ?""",
                 (*params, limit, offset),
             ).fetchall()
@@ -149,7 +170,8 @@ class HistoryStore:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """SELECT id, ticket_id, domain, workflow, provider, matched, verdict, findings_count,
-                    total_duration_ms, started_at, finished_at, comparison_group, result_json, created_at
+                    total_duration_ms, estimated_cost_usd, started_at, finished_at, comparison_group,
+                    result_json, created_at
                 FROM runs WHERE id = ?""",
                 (run_id,),
             ).fetchone()
@@ -188,6 +210,7 @@ class HistoryStore:
             failed = conn.execute("SELECT COUNT(*) AS c FROM runs WHERE verdict = 'fail'").fetchone()["c"]
             unmatched = conn.execute("SELECT COUNT(*) AS c FROM runs WHERE matched = 0").fetchone()["c"]
             avg_duration = conn.execute("SELECT AVG(total_duration_ms) AS a FROM runs").fetchone()["a"] or 0.0
+            total_cost = conn.execute("SELECT SUM(estimated_cost_usd) AS s FROM runs").fetchone()["s"] or 0.0
             by_provider_rows = conn.execute("SELECT provider, COUNT(*) AS c FROM runs GROUP BY provider").fetchall()
         return HistoryStats(
             total_runs=total,
@@ -195,11 +218,97 @@ class HistoryStore:
             failed=failed,
             unmatched=unmatched,
             avg_duration_ms=avg_duration,
+            total_cost_usd=total_cost,
             by_provider={row["provider"]: row["c"] for row in by_provider_rows},
         )
 
     async def stats(self) -> HistoryStats:
         return await asyncio.to_thread(self._stats_sync)
+
+    def _provider_stats_sync(self) -> list[ProviderStats]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT provider, verdict, total_duration_ms, estimated_cost_usd, result_json FROM runs"
+            ).fetchall()
+
+        by_provider: dict[str, list[sqlite3.Row]] = {}
+        for row in rows:
+            by_provider.setdefault(row["provider"], []).append(row)
+
+        stats: list[ProviderStats] = []
+        for provider, provider_rows in by_provider.items():
+            run_count = len(provider_rows)
+            pass_count = sum(1 for r in provider_rows if r["verdict"] == "pass")
+            fail_count = sum(1 for r in provider_rows if r["verdict"] == "fail")
+            avg_duration = sum(r["total_duration_ms"] for r in provider_rows) / run_count
+            total_cost = sum(r["estimated_cost_usd"] for r in provider_rows)
+
+            coverage_ratios, accuracy_ratios = [], []
+            missed_steps: Counter[str] = Counter()
+            for r in provider_rows:
+                metrics = json.loads(r["result_json"]).get("metrics")
+                if metrics:
+                    coverage_ratios.append(metrics["coverage_ratio"])
+                    accuracy_ratios.append(metrics["accuracy_ratio"])
+                    missed_steps.update(metrics.get("missed_steps", []))
+
+            stats.append(
+                ProviderStats(
+                    provider=provider,
+                    run_count=run_count,
+                    pass_count=pass_count,
+                    fail_count=fail_count,
+                    avg_duration_ms=avg_duration,
+                    avg_coverage_ratio=(sum(coverage_ratios) / len(coverage_ratios)) if coverage_ratios else 0.0,
+                    avg_accuracy_ratio=(sum(accuracy_ratios) / len(accuracy_ratios)) if accuracy_ratios else 0.0,
+                    avg_cost_usd=(total_cost / run_count) if run_count else 0.0,
+                    total_cost_usd=total_cost,
+                    common_missed_steps=[
+                        MissedStepCount(step=step, count=count) for step, count in missed_steps.most_common(5)
+                    ],
+                )
+            )
+        return stats
+
+    async def provider_stats(self) -> list[ProviderStats]:
+        return await asyncio.to_thread(self._provider_stats_sync)
+
+    def _daily_stats_sync(self, days: int) -> list[DailyStat]:
+        cutoff = time.time() - days * 86400
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT created_at, verdict, estimated_cost_usd, total_duration_ms FROM runs WHERE created_at >= ?",
+                (cutoff,),
+            ).fetchall()
+
+        buckets: dict[str, dict] = {}
+        for row in rows:
+            day = time.strftime("%Y-%m-%d", time.gmtime(row["created_at"]))
+            bucket = buckets.setdefault(day, {"total": 0, "passed": 0, "failed": 0, "cost": 0.0, "duration": 0.0})
+            bucket["total"] += 1
+            if row["verdict"] == "pass":
+                bucket["passed"] += 1
+            elif row["verdict"] == "fail":
+                bucket["failed"] += 1
+            bucket["cost"] += row["estimated_cost_usd"]
+            bucket["duration"] += row["total_duration_ms"]
+
+        return [
+            DailyStat(
+                date=day,
+                total=b["total"],
+                passed=b["passed"],
+                failed=b["failed"],
+                total_cost_usd=b["cost"],
+                avg_duration_ms=(b["duration"] / b["total"]) if b["total"] else 0.0,
+            )
+            for day, b in sorted(buckets.items())
+        ]
+
+    async def daily_stats(self, days: int = 7) -> list[DailyStat]:
+        return await asyncio.to_thread(self._daily_stats_sync, days)
 
 
 def _row_to_entry(row: sqlite3.Row) -> HistoryEntry:
@@ -213,6 +322,7 @@ def _row_to_entry(row: sqlite3.Row) -> HistoryEntry:
         verdict=row["verdict"],
         findings_count=row["findings_count"],
         total_duration_ms=row["total_duration_ms"],
+        estimated_cost_usd=row["estimated_cost_usd"],
         started_at=row["started_at"],
         finished_at=row["finished_at"],
         comparison_group=row["comparison_group"],
