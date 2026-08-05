@@ -1,45 +1,51 @@
 .analytics-page {
-  max-width: 1080px;
+  max-width: 1140px;
 }
 
 .analytics-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  margin-bottom: 1.5rem;
+  margin-bottom: var(--space-5);
   flex-wrap: wrap;
-  gap: 1rem;
+  gap: var(--space-4);
 }
 
 .analytics-title {
   margin: 0 0 0.35rem;
-  font-size: 28px;
+  font-size: var(--text-display);
+  font-weight: 700;
 }
 
 .analytics-subtitle {
   color: var(--text);
-  font-size: 14.5px;
+  font-size: var(--text-body);
   margin: 0;
 }
 
 .analytics-range {
   display: flex;
-  gap: 0.4rem;
+  gap: 4px;
+  padding: 3px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
 }
 
 .analytics-range button {
-  padding: 0.4rem 0.9rem;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--code-bg);
+  padding: 7px 14px;
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  background: none;
   color: var(--text);
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
 }
 
 .analytics-range button.active {
   border-color: var(--accent-border);
-  background: var(--accent-bg);
+  background: var(--bg);
   color: var(--accent);
   font-weight: 600;
 }
@@ -52,14 +58,14 @@
 .analytics-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 1.25rem;
+  gap: var(--space-4);
 }
 
 .analytics-panel {
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 1.25rem 1.5rem;
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
 }
 
 .analytics-panel-wide {
@@ -67,8 +73,9 @@
 }
 
 .analytics-panel h3 {
-  margin: 0 0 1rem;
+  margin: 0 0 var(--space-4);
   font-size: 13.5px;
+  font-weight: 700;
   color: var(--text-h);
   display: flex;
   align-items: baseline;

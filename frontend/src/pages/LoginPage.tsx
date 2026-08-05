@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from "react";
 import { Navigate, useLocation, useNavigate } from "react-router-dom";
+import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import "./LoginPage.css";
 
@@ -34,7 +35,10 @@ function LoginPage() {
   return (
     <div className="login-page app-shell-full-bleed">
       <div className="login-card">
-        <span className="login-eyebrow">🛡️ SentinelQA</span>
+        <span className="login-eyebrow">
+          <ShieldCheck size={13} aria-hidden="true" />
+          SentinelQA
+        </span>
         <h1 className="login-greeting">Welcome back.</h1>
         <p className="login-subtitle">Sign in to run your AI QA agents and see your latest reports.</p>
 
@@ -59,7 +63,12 @@ function LoginPage() {
             />
           </label>
 
-          {error && <p className="login-error">{error}</p>}
+          {error && (
+            <p className="login-error">
+              <AlertTriangle size={13} aria-hidden="true" />
+              {error}
+            </p>
+          )}
 
           <button type="submit" disabled={submitting || !username || !password}>
             {submitting ? "Signing in…" : "Sign in"}

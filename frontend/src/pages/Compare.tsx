@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Crown, Timer, Coins, Target, Percent, Trophy } from "lucide-react";
 import BarList from "../components/charts/BarList";
 import { apiGet, ApiError } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
@@ -31,6 +32,60 @@ const ROWS: { label: string; get: (p: ProviderStats) => string; winner?: (a: Pro
   },
   { label: "Total Cost", get: (p) => `$${p.total_cost_usd.toFixed(4)}` },
 ];
+
+const PROVIDER_LABELS = { claude: "Claude", ollama: "Llama (Ollama)" } as const;
+
+function MetricBar({
+  icon: Icon,
+  label,
+  claude,
+  ollama,
+  claudeDisplay,
+  ollamaDisplay,
+  winner,
+}: {
+  icon: typeof Timer;
+  label: string;
+  claude: number;
+  ollama: number;
+  claudeDisplay: string;
+  ollamaDisplay: string;
+  winner: "claude" | "ollama" | null;
+}) {
+  // For "lower is better" metrics (latency, cost) the bar still encodes
+  // magnitude directly - the winner badge (not bar length) communicates
+  // which direction is good, so the visualization stays honest either way.
+  const max = Math.max(claude, ollama, 0.0001);
+
+  return (
+    <div className="compare-metric-bar">
+      <div className="compare-metric-bar-label">
+        <Icon size={14} aria-hidden="true" />
+        {label}
+      </div>
+      <div className="compare-metric-bar-row">
+        <span className="compare-metric-bar-provider">Claude</span>
+        <div className="compare-metric-bar-track">
+          <div className="compare-metric-bar-fill compare-metric-bar-claude" style={{ width: `${(claude / max) * 100}%` }} />
+        </div>
+        <span className="compare-metric-bar-value">
+          {claudeDisplay}
+          {winner === "claude" && <Crown size={12} className="compare-metric-crown" aria-label="Winner" />}
+        </span>
+      </div>
+      <div className="compare-metric-bar-row">
+        <span className="compare-metric-bar-provider">Ollama</span>
+        <div className="compare-metric-bar-track">
+          <div className="compare-metric-bar-fill compare-metric-bar-ollama" style={{ width: `${(ollama / max) * 100}%` }} />
+        </div>
+        <span className="compare-metric-bar-value">
+          {ollamaDisplay}
+          {winner === "ollama" && <Crown size={12} className="compare-metric-crown" aria-label="Winner" />}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function Compare() {
   const { logout } = useAuth();
@@ -65,16 +120,68 @@ function Compare() {
   return (
     <div className="compare-page">
       <h1 className="compare-title">Model Comparison</h1>
-      <p className="compare-subtitle">Aggregated across every run each model has done so far.</p>
+      <p className="compare-subtitle">Claude vs Llama (Ollama), aggregated across every run each model has done so far.</p>
 
       {error && <p className="compare-error">{error}</p>}
 
       {!claude || !ollama ? (
-        <p className="compare-empty">
-          Not enough data yet - run at least one test with each model (or a "Compare Both" run) to see this page fill in.
-        </p>
+        <div className="compare-empty">
+          <Trophy size={26} aria-hidden="true" />
+          <p>
+            Not enough data yet — run at least one test with each model (or a "Compare Both" run) to see this page fill in.
+          </p>
+        </div>
       ) : (
         <>
+          {overallWinner && (
+            <div className={`compare-winner-banner compare-winner-banner-${overallWinner}`}>
+              <Trophy size={18} aria-hidden="true" />
+              <span>
+                <strong>{PROVIDER_LABELS[overallWinner]}</strong> leads on {winCount[overallWinner]} of{" "}
+                {winCount.claude + winCount.ollama} scored metrics.
+              </span>
+            </div>
+          )}
+
+          <div className="compare-bars-grid">
+            <MetricBar
+              icon={Timer}
+              label="Avg Latency"
+              claude={claude.avg_duration_ms}
+              ollama={ollama.avg_duration_ms}
+              claudeDisplay={`${(claude.avg_duration_ms / 1000).toFixed(1)}s`}
+              ollamaDisplay={`${(ollama.avg_duration_ms / 1000).toFixed(1)}s`}
+              winner={claude.avg_duration_ms <= ollama.avg_duration_ms ? "claude" : "ollama"}
+            />
+            <MetricBar
+              icon={Target}
+              label="Coverage"
+              claude={claude.avg_coverage_ratio}
+              ollama={ollama.avg_coverage_ratio}
+              claudeDisplay={`${Math.round(claude.avg_coverage_ratio * 100)}%`}
+              ollamaDisplay={`${Math.round(ollama.avg_coverage_ratio * 100)}%`}
+              winner={claude.avg_coverage_ratio >= ollama.avg_coverage_ratio ? "claude" : "ollama"}
+            />
+            <MetricBar
+              icon={Percent}
+              label="Accuracy"
+              claude={claude.avg_accuracy_ratio}
+              ollama={ollama.avg_accuracy_ratio}
+              claudeDisplay={`${Math.round(claude.avg_accuracy_ratio * 100)}%`}
+              ollamaDisplay={`${Math.round(ollama.avg_accuracy_ratio * 100)}%`}
+              winner={claude.avg_accuracy_ratio >= ollama.avg_accuracy_ratio ? "claude" : "ollama"}
+            />
+            <MetricBar
+              icon={Coins}
+              label="Cost / Test"
+              claude={claude.avg_cost_usd}
+              ollama={ollama.avg_cost_usd}
+              claudeDisplay={`$${claude.avg_cost_usd.toFixed(4)}`}
+              ollamaDisplay={`$${ollama.avg_cost_usd.toFixed(4)}`}
+              winner={claude.avg_cost_usd <= ollama.avg_cost_usd ? "claude" : "ollama"}
+            />
+          </div>
+
           <div className="compare-table-wrap">
             <table className="compare-table">
               <thead>
@@ -93,16 +200,14 @@ function Compare() {
                       <td className="compare-row-label">{row.label}</td>
                       <td className={winner === "claude" ? "compare-winner-cell" : ""}>{row.get(claude)}</td>
                       <td className={winner === "ollama" ? "compare-winner-cell" : ""}>{row.get(ollama)}</td>
-                      <td className="compare-winner-tag">{winner ? (winner === "claude" ? "Claude" : "Ollama") : "—"}</td>
+                      <td className="compare-winner-tag">{winner ? PROVIDER_LABELS[winner] : "—"}</td>
                     </tr>
                   );
                 })}
                 <tr className="compare-overall-row">
                   <td>Overall Winner</td>
-                  <td colSpan={2}>
-                    {overallWinner ? (overallWinner === "claude" ? "Claude (Sonnet 5)" : "Llama 3.1 (Ollama)") : "Tied"}
-                  </td>
-                  <td>{overallWinner && "🏆"}</td>
+                  <td colSpan={2}>{overallWinner ? PROVIDER_LABELS[overallWinner] : "Tied"}</td>
+                  <td>{overallWinner && <Trophy size={14} aria-hidden="true" />}</td>
                 </tr>
               </tbody>
             </table>

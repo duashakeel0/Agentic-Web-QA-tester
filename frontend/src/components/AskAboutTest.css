@@ -1,7 +1,7 @@
 .ask-about-test {
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-card);
   padding: 1.1rem 1.25rem;
   display: flex;
   flex-direction: column;
@@ -23,7 +23,7 @@
 .ask-suggestions button {
   font-size: 12px;
   padding: 5px 11px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--border);
   background: var(--code-bg);
   color: var(--text-h);
@@ -60,7 +60,7 @@
 .ask-error {
   margin: 0;
   font-size: 12.5px;
-  color: #f31260;
+  color: var(--status-critical);
 }
 
 .ask-form {
@@ -71,7 +71,7 @@
 .ask-form input {
   flex: 1;
   padding: 0.55rem 0.75rem;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--border);
   background: var(--code-bg);
   color: var(--text-h);
@@ -80,7 +80,10 @@
 
 .ask-form button {
   width: 38px;
-  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-control);
   border: none;
   background: var(--accent);
   color: #fff;

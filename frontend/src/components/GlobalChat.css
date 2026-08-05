@@ -31,7 +31,7 @@
   max-height: calc(100vh - 8rem);
   background: var(--code-bg);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
@@ -76,7 +76,7 @@
 .global-chat-message {
   max-width: 85%;
   padding: 0.55rem 0.8rem;
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -118,7 +118,7 @@
 .global-chat-form input {
   flex: 1;
   padding: 0.55rem 0.75rem;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text-h);
@@ -127,7 +127,10 @@
 
 .global-chat-form button {
   width: 38px;
-  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-control);
   border: none;
   background: var(--accent);
   color: #fff;

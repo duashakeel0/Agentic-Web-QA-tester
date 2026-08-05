@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { MessageCircle, Send, X } from "lucide-react";
 import { apiPost, ApiError } from "../services/api";
 import "./GlobalChat.css";
 
@@ -7,9 +8,9 @@ interface ChatMessage {
   content: string;
 }
 
-/** A general-purpose "ask Claude anything" assistant, reachable from every
- * page in the dashboard - unlike AskAboutTest, this isn't grounded in any
- * one report; it answers whatever it's asked, same as any Claude chat. */
+/** A general-purpose assistant, reachable from every page in the dashboard -
+ * unlike AskAboutTest, this isn't grounded in any one report; it answers
+ * whatever it's asked. */
 function GlobalChat() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -49,14 +50,20 @@ function GlobalChat() {
 
   return (
     <>
-      <button type="button" className="global-chat-fab" onClick={() => setOpen((v) => !v)} title="Ask Claude anything">
-        {open ? "✕" : "💬"}
+      <button
+        type="button"
+        className="global-chat-fab"
+        onClick={() => setOpen((v) => !v)}
+        aria-label={open ? "Close assistant" : "Open assistant"}
+        title="Ask anything"
+      >
+        {open ? <X size={20} aria-hidden="true" /> : <MessageCircle size={20} aria-hidden="true" />}
       </button>
 
       {open && (
         <div className="global-chat-panel">
           <div className="global-chat-header">
-            <span>Ask Claude anything</span>
+            <span>Ask anything</span>
             <span className="global-chat-subtitle">Not limited to test reports - ask about anything.</span>
           </div>
 
@@ -84,8 +91,8 @@ function GlobalChat() {
               disabled={sending}
               autoFocus
             />
-            <button type="submit" disabled={sending || !input.trim()}>
-              →
+            <button type="submit" disabled={sending || !input.trim()} aria-label="Send message">
+              <Send size={15} aria-hidden="true" />
             </button>
           </form>
         </div>

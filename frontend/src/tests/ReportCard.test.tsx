@@ -88,9 +88,9 @@ describe("ReportCard", () => {
 
     expect(document.querySelector(".report-actions-list")).not.toBeInTheDocument();
 
-    await user.click(screen.getByText(/Show agent outputs/));
+    await user.click(screen.getByText(/Show action log/));
 
     expect(document.querySelector(".report-actions-list")).toBeInTheDocument();
-    expect(screen.getByText(/Hide agent outputs/)).toBeInTheDocument();
+    expect(screen.getByText(/Hide action log/)).toBeInTheDocument();
   });
 });

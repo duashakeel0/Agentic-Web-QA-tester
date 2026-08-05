@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Send } from "lucide-react";
 import { apiPost, ApiError } from "../services/api";
 import "./AskAboutTest.css";
 
@@ -70,8 +71,8 @@ function AskAboutTest({ runId }: { runId: number }) {
           onChange={(event) => setQuestion(event.target.value)}
           disabled={asking}
         />
-        <button type="submit" disabled={asking || !question.trim()}>
-          {asking ? "…" : "→"}
+        <button type="submit" disabled={asking || !question.trim()} aria-label="Ask">
+          {asking ? "…" : <Send size={14} aria-hidden="true" />}
         </button>
       </form>
     </div>

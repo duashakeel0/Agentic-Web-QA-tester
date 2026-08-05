@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AlertTriangle, Rocket, RotateCcw } from "lucide-react";
 import ComparisonSummary from "../components/ComparisonSummary";
 import ModelSelector from "../components/ModelSelector";
 import PipelineTimeline from "../components/PipelineTimeline";
@@ -46,10 +47,12 @@ function RunTest() {
 
           <div className="run-test-actions">
             <button type="submit" disabled={running || !ticketId.trim()}>
+              <Rocket size={16} aria-hidden="true" />
               {running ? "Running…" : "Start Test"}
             </button>
             {status !== "idle" && (
               <button type="button" className="run-test-reset" onClick={reset} disabled={running}>
+                <RotateCcw size={13} aria-hidden="true" />
                 Reset
               </button>
             )}
@@ -68,7 +71,12 @@ function RunTest() {
           </div>
         )}
 
-        {errorMessage && <div className="run-test-error">{errorMessage}</div>}
+        {errorMessage && (
+          <div className="run-test-error">
+            <AlertTriangle size={14} aria-hidden="true" />
+            {errorMessage}
+          </div>
+        )}
       </div>
 
       {status !== "idle" && (

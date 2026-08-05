@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { ArrowLeft, Loader2 } from "lucide-react";
 import AskAboutTest from "../components/AskAboutTest";
 import ComparisonSummary from "../components/ComparisonSummary";
 import ReportCard from "../components/ReportCard";
@@ -61,29 +62,45 @@ function HistoryReport() {
   return (
     <div className="history-report-page">
       <Link to="/history" className="history-report-back">
-        ← Back to History
+        <ArrowLeft size={14} aria-hidden="true" />
+        Back to History
       </Link>
-      <h1 className="history-report-title">Report</h1>
+      <h1 className="history-report-title">Test Report</h1>
 
       {error && <p className="history-report-error">{error}</p>}
-      {!entry && !error && <p className="history-report-loading">Loading…</p>}
+      {!entry && !error && (
+        <p className="history-report-loading">
+          <Loader2 size={15} className="history-report-spinner" aria-hidden="true" />
+          Loading report…
+        </p>
+      )}
 
       {entry && (
         <>
-          <div className="history-report-grid">
-            <ReportCard result={entry.result} historyId={entry.id} />
-            {siblingResult && <ReportCard result={siblingResult} historyId={siblingId ?? undefined} />}
-          </div>
-          <div className="history-report-ask">
-            <AskAboutTest runId={entry.id} />
-          </div>
-        </>
-      )}
+          <section className="history-report-section">
+            <h2 className="history-report-section-title">Overview</h2>
+            <div className="history-report-grid">
+              <ReportCard result={entry.result} historyId={entry.id} />
+              {siblingResult && <ReportCard result={siblingResult} historyId={siblingId ?? undefined} />}
+            </div>
+          </section>
 
-      {comparison && (
-        <div className="history-report-comparison">
-          <ComparisonSummary comparison={comparison.comparison} />
-        </div>
+          {comparison && (
+            <section className="history-report-section">
+              <h2 className="history-report-section-title">Model Comparison</h2>
+              <div className="history-report-comparison">
+                <ComparisonSummary comparison={comparison.comparison} />
+              </div>
+            </section>
+          )}
+
+          <section className="history-report-section">
+            <h2 className="history-report-section-title">Ask About This Test</h2>
+            <div className="history-report-ask">
+              <AskAboutTest runId={entry.id} />
+            </div>
+          </section>
+        </>
       )}
     </div>
   );

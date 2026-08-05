@@ -43,7 +43,7 @@
 }
 
 .comparison-winner {
-  color: #17c964;
+  color: var(--status-good);
   font-weight: 700;
 }
 

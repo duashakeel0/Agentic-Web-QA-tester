@@ -59,8 +59,11 @@
 }
 
 .run-test-actions button[type="submit"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   padding: 0.7rem 1.75rem;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: none;
   background: var(--accent);
   color: #fff;
@@ -76,8 +79,11 @@
 }
 
 .run-test-reset {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 0.7rem 1.25rem;
-  border-radius: 10px;
+  border-radius: var(--radius-control);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
@@ -103,27 +109,30 @@
 
 .status-connecting,
 .status-running {
-  background: #f5a524;
-  box-shadow: 0 0 0 4px rgba(245, 165, 36, 0.2);
+  background: var(--status-warning);
+  box-shadow: 0 0 0 4px var(--status-warning-bg);
 }
 
 .status-done {
-  background: #17c964;
-  box-shadow: 0 0 0 4px rgba(23, 201, 100, 0.2);
+  background: var(--status-good);
+  box-shadow: 0 0 0 4px var(--status-good-bg);
 }
 
 .status-error {
-  background: #f31260;
-  box-shadow: 0 0 0 4px rgba(243, 18, 96, 0.2);
+  background: var(--status-critical);
+  box-shadow: 0 0 0 4px var(--status-critical-bg);
 }
 
 .run-test-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-top: 1rem;
-  border: 1px solid rgba(243, 18, 96, 0.35);
-  background: rgba(243, 18, 96, 0.08);
-  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--status-critical) 35%, var(--border));
+  background: var(--status-critical-bg);
+  border-radius: var(--radius-control);
   padding: 0.75rem 1rem;
-  color: #f31260;
+  color: var(--status-critical);
   font-size: 13.5px;
 }
 

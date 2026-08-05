@@ -1,5 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import {
+  AlertTriangle,
+  Bug,
+  CheckCircle2,
+  Clock3,
+  Coins,
+  ListChecks,
+  Rocket,
+  RotateCcw,
+  Target,
+} from "lucide-react";
 import AskAboutTest from "../components/AskAboutTest";
 import BarList from "../components/charts/BarList";
 import DonutChart from "../components/charts/DonutChart";
@@ -10,14 +21,67 @@ import PipelineTimeline from "../components/PipelineTimeline";
 import ReportCard from "../components/ReportCard";
 import TalkingAgentsPanel from "../components/TalkingAgentsPanel";
 import { useAuth } from "../contexts/AuthContext";
-import { usePipelineRun } from "../hooks/usePipelineRun";
+import { usePipelineRun, type RunStatus } from "../hooks/usePipelineRun";
 import { apiGet, ApiError } from "../services/api";
 import type { DailyStat, HistoryEntry, HistoryStats, ProviderStats } from "../types/history";
 import type { ModelChoice } from "../types/pipeline";
 import "./Dashboard.css";
 
+const AGENT_READY_ROW = [
+  { name: "Planner", color: "var(--claude-color)" },
+  { name: "Explorer", color: "var(--accent-blue)" },
+  { name: "Verifier", color: "var(--status-warning)" },
+  { name: "Reporter", color: "var(--accent)" },
+];
+
+const PROVIDER_LABELS: Record<string, string> = { claude: "Claude", ollama: "Llama (Ollama)" };
+
 function formatDate(unixSeconds: number): string {
   return new Date(unixSeconds * 1000).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+}
+
+interface Toast {
+  id: number;
+  tone: "success" | "error" | "info";
+  text: string;
+}
+
+/** Small self-dismissing toast stack, driven entirely by transitions on the
+ * run's existing status/errorMessage/comparison state - no new backend
+ * events, just surfacing what usePipelineRun already tells us. */
+function useRunToasts(status: RunStatus, errorMessage: string | null, ticketId: string) {
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const idRef = useRef(0);
+  const prevStatus = useRef<RunStatus>(status);
+
+  useEffect(() => {
+    if (prevStatus.current === status) return;
+    const prev = prevStatus.current;
+    prevStatus.current = status;
+
+    if (status === "done" && prev !== "idle") {
+      idRef.current += 1;
+      setToasts((t) => [...t, { id: idRef.current, tone: "success", text: `Run finished for ticket ${ticketId}.` }]);
+    } else if (status === "error") {
+      idRef.current += 1;
+      setToasts((t) => [...t, { id: idRef.current, tone: "error", text: errorMessage ?? "Run failed." }]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status]);
+
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    const timers = toasts.map((toast) =>
+      setTimeout(() => setToasts((t) => t.filter((x) => x.id !== toast.id)), 5000),
+    );
+    return () => timers.forEach(clearTimeout);
+  }, [toasts]);
+
+  function dismiss(id: number) {
+    setToasts((t) => t.filter((x) => x.id !== id));
+  }
+
+  return { toasts, dismiss };
 }
 
 function Dashboard() {
@@ -25,6 +89,7 @@ function Dashboard() {
   const [ticketId, setTicketId] = useState("");
   const [model, setModel] = useState<ModelChoice>("claude");
   const { status, feed, stages, results, historyIds, comparison, errorMessage, start, reset } = usePipelineRun();
+  const { toasts, dismiss } = useRunToasts(status, errorMessage, ticketId);
 
   const [stats, setStats] = useState<HistoryStats | null>(null);
   const [daily, setDaily] = useState<DailyStat[]>([]);
@@ -35,6 +100,7 @@ function Dashboard() {
   const running = status === "connecting" || status === "running";
   const resultList = Object.values(results);
   const primaryHistoryId = historyIds.claude ?? historyIds.ollama;
+  const activeProviders = Object.keys(stages);
 
   function reloadDashboardData() {
     Promise.all([
@@ -79,6 +145,18 @@ function Dashboard() {
 
   const claudeProvider = providerStats.find((p) => p.provider === "claude");
   const ollamaProvider = providerStats.find((p) => p.provider === "ollama");
+
+  // Weighted (by run count) average across whichever providers have data -
+  // real numbers already returned by /api/history/provider-stats, just
+  // rolled up for the top-level stat row instead of shown per-provider only.
+  const weightedAverage = (pick: (p: ProviderStats) => number): number | null => {
+    const totalRuns = providerStats.reduce((sum, p) => sum + p.run_count, 0);
+    if (totalRuns === 0) return null;
+    return providerStats.reduce((sum, p) => sum + pick(p) * p.run_count, 0) / totalRuns;
+  };
+  const avgCoverage = weightedAverage((p) => p.avg_coverage_ratio);
+  const avgAccuracy = weightedAverage((p) => p.avg_accuracy_ratio);
+
   const commonMissedSteps = useMemo(() => {
     const merged = new Map<string, number>();
     for (const p of providerStats) {
@@ -94,23 +172,68 @@ function Dashboard() {
 
   const statCards = stats
     ? [
-        { label: "Total Tests", value: stats.total_runs },
-        { label: "Passed", value: stats.passed, tone: "pass" as const },
-        { label: "Failed", value: stats.failed, tone: "fail" as const },
-        { label: "Avg Duration", value: `${(stats.avg_duration_ms / 1000).toFixed(1)}s` },
-        { label: "Total Cost", value: `$${stats.total_cost_usd.toFixed(4)}` },
-        { label: "Issues Found", value: recentRuns.reduce((sum, r) => sum + r.findings_count, 0) },
+        { label: "Total Tests", value: `${stats.total_runs}`, icon: ListChecks, tone: "neutral" as const },
+        {
+          label: "Pass Rate",
+          value: stats.total_runs > 0 ? `${Math.round((stats.passed / stats.total_runs) * 100)}%` : "–",
+          icon: CheckCircle2,
+          tone: "pass" as const,
+        },
+        {
+          label: "Avg Coverage",
+          value: avgCoverage !== null ? `${Math.round(avgCoverage * 100)}%` : "–",
+          icon: Target,
+          tone: "neutral" as const,
+        },
+        {
+          label: "Avg Accuracy",
+          value: avgAccuracy !== null ? `${Math.round(avgAccuracy * 100)}%` : "–",
+          icon: CheckCircle2,
+          tone: "neutral" as const,
+        },
+        {
+          label: "Avg Duration",
+          value: `${(stats.avg_duration_ms / 1000).toFixed(1)}s`,
+          icon: Clock3,
+          tone: "neutral" as const,
+        },
+        { label: "Total Cost", value: `$${stats.total_cost_usd.toFixed(4)}`, icon: Coins, tone: "neutral" as const },
       ]
     : [];
 
   return (
     <div className="dash-page">
+      {toasts.length > 0 && (
+        <div className="dash-toast-stack" role="status" aria-live="polite">
+          {toasts.map((toast) => (
+            <div className={`dash-toast dash-toast-${toast.tone}`} key={toast.id}>
+              {toast.tone === "error" ? <AlertTriangle size={15} /> : <CheckCircle2 size={15} />}
+              <span>{toast.text}</span>
+              <button type="button" aria-label="Dismiss notification" onClick={() => dismiss(toast.id)}>
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       <header className="dash-hero">
-        <h1>Welcome back, {username ?? "Dua"}! 👋</h1>
-        <p>
-          Your AI testing team is online and ready to analyze your next website. Enter a URL or connect a Trello
-          ticket to get started.
-        </p>
+        <div className="dash-hero-copy">
+          <span className="dash-hero-eyebrow">AI Command Center</span>
+          <h1>Welcome back, {username ?? "Dua"}! 👋</h1>
+          <p>
+            Your AI testing team is online and ready to analyze your next website. Enter a URL or connect a Trello
+            ticket to get started.
+          </p>
+        </div>
+        <div className="dash-hero-agent-row" aria-label="Agent readiness">
+          {AGENT_READY_ROW.map((agent) => (
+            <span className="dash-hero-agent-chip" key={agent.name}>
+              <span className="dash-hero-agent-dot" style={{ background: agent.color }} aria-hidden="true" />
+              {agent.name}
+            </span>
+          ))}
+        </div>
       </header>
 
       <section className="dash-panel dash-start-panel">
@@ -130,13 +253,16 @@ function Dashboard() {
             value={ticketId}
             onChange={(event) => setTicketId(event.target.value)}
             placeholder="Trello ticket ID…"
+            aria-label="Trello ticket ID"
             disabled={running}
+            className="dash-ticket-input"
           />
-          <button type="submit" disabled={running || !ticketId.trim()}>
-            {running ? "Running…" : "Start Test →"}
+          <ModelSelector value={model} onChange={setModel} disabled={running} />
+          <button type="submit" className="dash-launch-btn" disabled={running || !ticketId.trim()}>
+            <Rocket size={16} aria-hidden="true" />
+            {running ? "Running…" : "Launch Test"}
           </button>
         </form>
-        <ModelSelector value={model} onChange={setModel} disabled={running} />
         {status !== "idle" && (
           <div className="dash-status-row">
             <span className={`status-dot status-${status}`} />
@@ -148,20 +274,34 @@ function Dashboard() {
             </span>
             {status !== "running" && status !== "connecting" && (
               <button type="button" className="dash-reset-link" onClick={reset}>
+                <RotateCcw size={12} aria-hidden="true" />
                 Reset
               </button>
             )}
           </div>
         )}
-        {errorMessage && <div className="dash-error">{errorMessage}</div>}
+        {errorMessage && (
+          <div className="dash-error">
+            <AlertTriangle size={14} aria-hidden="true" />
+            {errorMessage}
+          </div>
+        )}
       </section>
 
-      {loadError && <p className="dash-error">{loadError}</p>}
+      {loadError && (
+        <p className="dash-error">
+          <AlertTriangle size={14} aria-hidden="true" />
+          {loadError}
+        </p>
+      )}
 
       <section className="dash-stat-grid">
         {stats
           ? statCards.map((card) => (
-              <div className={`dash-stat-card${card.tone ? ` stat-${card.tone}` : ""}`} key={card.label}>
+              <div className={`dash-stat-card${card.tone !== "neutral" ? ` stat-${card.tone}` : ""}`} key={card.label}>
+                <span className="dash-stat-icon" aria-hidden="true">
+                  <card.icon size={16} />
+                </span>
                 <span className="dash-stat-value">{card.value}</span>
                 <span className="dash-stat-label">{card.label}</span>
               </div>
@@ -173,7 +313,16 @@ function Dashboard() {
         <div className="dash-main-col">
           {status !== "idle" && (
             <section className="dash-panel">
-              <h2 className="dash-panel-title">Live Run</h2>
+              <div className="dash-panel-heading">
+                <h2 className="dash-panel-title">Live Run</h2>
+                <div className="dash-live-providers">
+                  {activeProviders.map((p) => (
+                    <span className={`dash-live-provider-tag dash-live-provider-${p}`} key={p}>
+                      {PROVIDER_LABELS[p] ?? p}
+                    </span>
+                  ))}
+                </div>
+              </div>
               <div className="dash-live-row">
                 <div className="dash-live-timeline">
                   <PipelineTimeline stages={stages} />
@@ -229,7 +378,9 @@ function Dashboard() {
               />
             </div>
             <div className="dash-chart-block">
-              <h3>Commonly Missed Steps</h3>
+              <h3>
+                <Bug size={13} aria-hidden="true" /> Commonly Missed Steps
+              </h3>
               <BarList items={commonMissedSteps} defaultColor="var(--status-warning)" />
             </div>
           </section>
@@ -244,13 +395,13 @@ function Dashboard() {
               </Link>
             </div>
             <div className="dash-history-list">
-              {recentRuns.length === 0 && <p className="dash-empty">No tests run yet.</p>}
+              {recentRuns.length === 0 && <p className="dash-empty">No tests run yet. Launch one above to get started.</p>}
               {recentRuns.map((run) => (
                 <Link to={`/history/${run.id}`} className="dash-history-row" key={run.id}>
                   <div>
                     <div className="dash-history-website">{run.matched ? `${run.domain}/${run.workflow}` : "unmatched"}</div>
                     <div className="dash-history-ticket">
-                      {run.ticket_id} · {run.provider}
+                      {run.ticket_id} · {PROVIDER_LABELS[run.provider] ?? run.provider}
                     </div>
                   </div>
                   <div className="dash-history-right">
