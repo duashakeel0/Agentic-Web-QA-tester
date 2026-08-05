@@ -1,0 +1,18 @@
+# Deliberately minimal: Amazon actively detects and blocks automated login
+# and checkout flows (CAPTCHA, bot walls), so unlike the other domains this
+# one only registers a read-only smoke workflow - no credentials, no forms.
+# That keeps it demo-safe instead of flaky.
+name: amazon
+base_url: https://www.amazon.com
+workflows:
+  - name: homepage_loads
+    steps:
+      - Navigate to the homepage
+    expected_outcome:
+      text_contains: Amazon
+
+  - name: search_for_a_product
+    steps:
+      - Search for "wireless mouse" using the search bar
+    expected_outcome:
+      text_contains: results
