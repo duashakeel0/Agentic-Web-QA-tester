@@ -60,7 +60,7 @@ class ReporterAgent:
         findings.sort(key=lambda f: SEVERITY_ORDER.get(f.severity, 99))
 
         report = Report(ticket_id=ticket_id, findings=findings)
-        summary_text = self._render_summary(report)
+        summary_text = self._render_summary(report, runs)
         await self._post_with_retry(ticket_id, summary_text, report)
 
         return report
@@ -75,10 +75,22 @@ class ReporterAgent:
             workflow=exploration.workflow,
             severity=severity,
             summary=summary,
+            error_message=self._error_message(exploration, verification),
             reproduction_steps=self._reproduction_steps(exploration),
             screenshot_path=verification.screenshot_path,
             explanation=verification.explanation,
         )
+
+    @staticmethod
+    def _error_message(exploration: ExplorationResult, verification: VerifierResult) -> str | None:
+        """The most specific underlying error available, distinct from the
+        LLM-written failure reason - a Trello comment should show both."""
+        if verification.retry_error:
+            return verification.retry_error
+        if exploration.error:
+            return exploration.error
+        failed_actions = [a for a in exploration.actions if not a.success and a.error]
+        return failed_actions[-1].error if failed_actions else None
 
     @staticmethod
     def _reproduction_steps(exploration: ExplorationResult) -> list[str]:
@@ -151,17 +163,40 @@ Respond with ONLY a JSON object, no other text, in exactly this shape:
         report.post_summary_error = last_error
 
     @staticmethod
-    def _render_summary(report: Report) -> str:
-        if not report.findings:
-            return "Verification run completed - no confirmed findings."
+    def _render_summary(report: Report, runs: list[RunResult]) -> str:
+        """Every Trello comment leads with an explicit Result line and a
+        testing summary, then one block per confirmed finding with its
+        failure reason and raw error message - not just a list of bugs
+        with no indication of what passed."""
+        passed = [r for r in runs if r.verification.verdict == "pass"]
+        failed = [r for r in runs if r.verification.verdict != "pass"]
 
-        lines = [f"{len(report.findings)} confirmed finding(s), ranked by severity:", ""]
+        lines = [
+            f"Result: {'FAIL' if failed else 'PASS'}",
+            f"Testing summary: {len(passed)} passed, {len(failed)} failed out of {len(runs)} workflow(s) tested.",
+            "",
+        ]
+        for run in passed:
+            lines.append(
+                f"[PASS] {run.exploration.domain}/{run.exploration.workflow} - "
+                f"completed in {len(run.exploration.actions)} action(s)."
+            )
+
+        if not report.findings:
+            return "\n".join(lines).rstrip()
+
+        lines.append("")
+        lines.append(f"{len(report.findings)} confirmed finding(s), ranked by severity:")
+        lines.append("")
         for finding in report.findings:
-            lines.append(f"[{finding.severity.upper()}] {finding.domain}/{finding.workflow}: {finding.summary}")
+            lines.append(f"[{finding.severity.upper()}] {finding.domain}/{finding.workflow}")
+            lines.append(f"Failure reason: {finding.summary}")
+            if finding.error_message:
+                lines.append(f"Error message: {finding.error_message}")
             if finding.reproduction_steps:
                 lines.append("Reproduction steps:")
                 lines.extend(f"  {i + 1}. {step}" for i, step in enumerate(finding.reproduction_steps))
             if finding.screenshot_path:
                 lines.append(f"Screenshot: {finding.screenshot_path}")
             lines.append("")
-        return "\n".join(lines)
+        return "\n".join(lines).rstrip()

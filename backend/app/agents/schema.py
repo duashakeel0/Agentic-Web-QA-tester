@@ -68,7 +68,8 @@ class Finding(BaseModel):
     domain: str
     workflow: str
     severity: str  # "high" | "medium" | "low"
-    summary: str
+    summary: str  # the failure reason, one sentence for a bug report
+    error_message: str | None = None  # the raw underlying error, if any
     reproduction_steps: list[str]
     screenshot_path: str | None = None
     explanation: str | None = None
