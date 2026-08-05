@@ -237,6 +237,16 @@ class ExplorerAgent:
         )
 
     def _step_prompt(self, step: str, snapshot: dict, step_actions: list[ActionLogEntry]) -> str:
+        nav_hint = ""
+        if not self._is_interactive_step(step):  # pure navigation/wait step
+            nav_hint = """
+This step needs no form interaction - it's only asking to be on the right
+page or for something to have finished loading, nothing more. If the current
+URL/page state above already satisfies it, respond with "done" immediately.
+Do NOT fill in, click, or otherwise interact with any form or element on the
+page for this step, even if the page shows a login form or other inputs -
+those belong to a later step, not this one.
+"""
         history = ""
         if step_actions:
             done_list = "\n".join(
@@ -255,7 +265,7 @@ This step is a human-written skeleton, not a fixed script - you must find and
 use the real elements on the current page to carry it out.
 
 Step: "{step}"
-{history}
+{nav_hint}{history}
 Current page:
 URL: {snapshot["url"]}
 Title: {snapshot["title"]}

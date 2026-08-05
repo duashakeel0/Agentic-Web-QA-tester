@@ -21,7 +21,6 @@ from app.agents.llm_client import LLMClient, LLMError
 from app.agents.schema import ExplorationResult, Finding, Report, RunResult, VerifierResult
 from app.mcp_server.server import post_summary
 
-CLASSIFY_TIMEOUT_SECONDS = 20
 POST_SUMMARY_MAX_ATTEMPTS = 2
 SEVERITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
@@ -112,7 +111,12 @@ class ReporterAgent:
 
         prompt = self._classification_prompt(exploration, verification)
         try:
-            data, _ = await self._llm.complete_json(prompt, max_tokens=300, timeout=CLASSIFY_TIMEOUT_SECONDS)
+            # No explicit timeout here on purpose - each provider's own
+            # client already picks a sensible default (60s Claude, 180s
+            # Ollama, which genuinely needs that long on a slow/cold local
+            # machine). A single flat timeout for both providers was either
+            # too tight for Ollama or too loose for Claude.
+            data, _ = await self._llm.complete_json(prompt, max_tokens=300)
             severity = data.get("severity")
             if severity not in ("high", "medium", "low"):
                 raise ValueError(f"Unexpected severity value: {severity!r}")
