@@ -11,12 +11,14 @@ PipelineResult, and the comparison between them.
 """
 
 import asyncio
+import os
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 from typing import TypeVar
 
 from app.agents.claude_client import ClaudeLLMClient
 from app.agents.explorer import ExplorerAgent
+from app.agents.groq_client import GroqLLMClient
 from app.agents.llm_client import LLMClient
 from app.agents.ollama_client import OllamaLLMClient
 from app.agents.planner import PlannerAgent
@@ -46,6 +48,13 @@ def make_llm(provider: str) -> LLMClient:
     if provider == "claude":
         return ClaudeLLMClient()
     if provider == "ollama":
+        # OLLAMA_BACKEND lets the "ollama" slot run on Groq's hosted Llama
+        # instead of a local Ollama install - same interface, same
+        # provider label everywhere downstream, just a much faster place
+        # to actually run the model when local CPU inference is the
+        # bottleneck. Defaults to local so nothing changes unless opted in.
+        if os.environ.get("OLLAMA_BACKEND", "local").lower() == "groq":
+            return GroqLLMClient()
         return OllamaLLMClient()
     raise ValueError(f"Unknown model provider: {provider!r} - expected 'claude' or 'ollama'.")
 

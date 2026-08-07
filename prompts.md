@@ -373,3 +373,22 @@ Running log of significant AI prompts used to build this project, per the intern
 - New Explorer tests: the redundant first step (browser already at `domain.base_url`) never reaches `_execute_step` (so never makes an LLM call); a first step where `goto()` landed somewhere else (simulating a redirect) is NOT skipped and still goes through the normal decision path.
 - Full backend suite (172 tests, +2) passes.
 - **Not yet completed:** can't verify against the real live ParaBank page from this sandbox whether `goto()` lands on an URL that string-matches `domain.base_url` *exactly* (a redirect adding a session param, for instance, would silently fall back to the old model-decides behavior rather than break anything) - worth confirming on a real run.
+
+---
+
+## Groq as an alternative Ollama backend
+
+**Context:** Even with the earlier fixes (longer timeout, keep_alive, llama3.2, redundant-step skip), running an LLM on CPU-only local hardware is inherently slower than a cloud API - that's an expected limitation, not a bug, but still a real problem for a live demo. Asked whether Ollama could be connected some other way instead of running on the user's own device.
+
+**Prompt:** "is it possible to connect ollama in any other way rather than running it on my device" - offered two paths (rent a GPU cloud box and point OLLAMA_HOST at it, needing no code; or add a Groq-backed client for genuinely fast hosted inference, needing new code) and asked which. Chose the Groq client.
+
+**What was generated:**
+- `backend/app/agents/groq_client.py` (new) - `GroqLLMClient`, hitting Groq's OpenAI-compatible `/chat/completions` endpoint (Bearer auth, `response_format: json_object` for the same JSON-only contract every prompt in this project relies on). Deliberately kept `provider = "ollama"` rather than introducing a real "groq" provider concept - it's a drop-in backend for the same free/local-model comparison arm, so every existing report/history-stats/frontend path (which only knows "claude" and "ollama") keeps working with zero changes. The actual model name (`llama-3.1-8b-instant` by default) still shows up wherever a run's timings are displayed, so nothing is hidden from the report.
+- `backend/app/agents/pipeline.py`'s `make_llm()` - a new `OLLAMA_BACKEND` env var (default `"local"`) switches the "ollama" slot between `OllamaLLMClient` and `GroqLLMClient` - opt-in only, so nothing changes for anyone who doesn't set it.
+- `.env.example` - documents `OLLAMA_BACKEND`, `GROQ_API_KEY`, `GROQ_MODEL`.
+
+**What was checked/modified before accepting:**
+- New Groq client unit tests (mirroring the Ollama client's own test shape): correct text/token-count parsing, Bearer auth header, JSON-mode request body, missing-API-key error, env-configurable model, HTTP-error/timeout/connection-error/malformed-response all raising a clean `LLMError`.
+- New pipeline test: `make_llm("ollama")` returns the local client by default, and the Groq client only once `OLLAMA_BACKEND=groq` is explicitly set - and confirms the returned client's `provider` is still `"ollama"`, not a new value.
+- Full backend suite (183 tests, +11) passes.
+- **Not yet completed:** no real Groq API key available in this sandbox to verify against Groq's actual live API (only the shape of its documented OpenAI-compatible endpoint) - worth a real run once the user has a free Groq key to confirm both the request/response format and that it's actually meaningfully faster on their hardware.

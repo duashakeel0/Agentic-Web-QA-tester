@@ -244,3 +244,22 @@ async def test_compare_flags_disagreement_and_missed_steps(monkeypatch):
 def test_make_llm_rejects_unknown_provider():
     with pytest.raises(ValueError, match="Unknown model provider"):
         _real_make_llm("gpt4")
+
+
+def test_make_llm_defaults_ollama_slot_to_local(monkeypatch):
+    from app.agents.ollama_client import OllamaLLMClient
+
+    monkeypatch.delenv("OLLAMA_BACKEND", raising=False)
+    assert isinstance(_real_make_llm("ollama"), OllamaLLMClient)
+
+
+def test_make_llm_routes_ollama_slot_to_groq_when_opted_in(monkeypatch):
+    from app.agents.groq_client import GroqLLMClient
+
+    monkeypatch.setenv("OLLAMA_BACKEND", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    llm = _real_make_llm("ollama")
+    assert isinstance(llm, GroqLLMClient)
+    # Same provider label as local Ollama - every downstream report/stat/UI
+    # path only knows "claude"/"ollama", not a distinct "groq" concept.
+    assert llm.provider == "ollama"
