@@ -8,15 +8,12 @@ send every downstream agent testing the wrong thing.
 """
 
 import json
-import os
 
-from anthropic import AsyncAnthropic
-
+from app.agents.claude_client import ClaudeLLMClient
+from app.agents.llm_client import LLMClient, LLMError
 from app.agents.schema import TestPlan
 from app.domains.manifest import load_domains
 from app.mcp_server.server import get_ticket
-
-PLANNER_MODEL = "claude-sonnet-5"
 
 
 class PlannerError(Exception):
@@ -25,11 +22,14 @@ class PlannerError(Exception):
 
 
 class PlannerAgent:
-    def __init__(self) -> None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
-            raise PlannerError("ANTHROPIC_API_KEY must be set before the Planner can run.")
-        self._client = AsyncAnthropic(api_key=api_key)
+    def __init__(self, llm: LLMClient | None = None) -> None:
+        if llm is not None:
+            self._llm = llm
+        else:
+            try:
+                self._llm = ClaudeLLMClient()
+            except LLMError as exc:
+                raise PlannerError(str(exc)) from exc
         self._domains = load_domains()
 
     async def plan(self, ticket_id: str) -> TestPlan:
@@ -96,14 +96,8 @@ or
 {{"matched": false, "reason": "<short reason>"}}
 """
 
-        response = await self._client.messages.create(
-            model=PLANNER_MODEL,
-            max_tokens=300,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        raw_text = response.content[0].text.strip()
         try:
-            return json.loads(raw_text)
-        except (json.JSONDecodeError, IndexError) as exc:
-            raise PlannerError(f"Planner model returned an unparseable response: {raw_text!r}") from exc
+            data, _ = await self._llm.complete_json(prompt, max_tokens=300)
+            return data
+        except LLMError as exc:
+            raise PlannerError(str(exc)) from exc

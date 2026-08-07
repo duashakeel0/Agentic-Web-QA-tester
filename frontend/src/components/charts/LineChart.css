@@ -1,0 +1,32 @@
+.line-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.line-chart-svg {
+  width: 100%;
+  height: 70px;
+  display: block;
+}
+
+.line-chart-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 11.5px;
+  color: var(--text);
+}
+
+.line-chart-last {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.chart-empty {
+  margin: 0;
+  padding: 1.5rem 0;
+  text-align: center;
+  font-size: 13px;
+  color: var(--text);
+}

@@ -110,6 +110,12 @@ python -m app.agents.run_verifier <ticket_id>
 ```
 Runs Planner → Explorer → Verifier back to back, reusing the Explorer's own live browser session for the Verifier's re-check, and prints the final pass/fail verdict.
 
+**Reporter agent** (needs `SMTP_HOST`/`ALERT_EMAIL_TO` in `.env` to actually send alert emails - without them, findings still get classified and posted back to Trello, just no email):
+```bash
+python -m app.agents.run_reporter <ticket_id>
+```
+Runs the full pipeline (Planner → Explorer → Verifier → Reporter), prints the final severity-ranked report, and posts a summary back to the ticket.
+
 ## Project log
 
 See `prompts.md` for a running log of significant AI prompts used to build this project.

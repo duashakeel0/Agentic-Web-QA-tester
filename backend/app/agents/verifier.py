@@ -15,26 +15,31 @@ import asyncio
 import json
 import os
 
-from anthropic import APIError, AsyncAnthropic
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
+from app.agents.claude_client import ClaudeLLMClient
+from app.agents.llm_client import LLMClient, LLMError
 from app.agents.schema import ExplorationResult, VerifierResult
 from app.browser import BrowserSession
 
-VERIFIER_MODEL = "claude-sonnet-5"
 RECHECK_WAIT_SECONDS = 2
 RECHECK_NAV_TIMEOUT_SECONDS = 15
 LLM_TIMEOUT_SECONDS = 20
 LLM_RETRY_TIMEOUT_SECONDS = 8
+SCREENSHOT_DIR = "reports/screenshots"
 
 
 class VerifierAgent:
-    def __init__(self, anthropic_client: AsyncAnthropic | None = None) -> None:
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        self._client = anthropic_client if anthropic_client is not None else (
-            AsyncAnthropic(api_key=api_key) if api_key else None
-        )
+    def __init__(self, llm: LLMClient | None = None, screenshot_dir: str = SCREENSHOT_DIR) -> None:
+        if llm is not None:
+            self._llm = llm
+        else:
+            try:
+                self._llm = ClaudeLLMClient()
+            except LLMError:
+                self._llm = None
+        self._screenshot_dir = screenshot_dir
 
     async def verify(
         self,
@@ -76,7 +81,9 @@ class VerifierAgent:
                 explanation_status=status,
             )
 
-        retry_passed, retry_error = await self._recheck(expected_outcome, result.final_url, browser)
+        retry_passed, retry_error, screenshot_path = await self._recheck(
+            expected_outcome, result.final_url, browser, result.ticket_id, result.domain, result.workflow
+        )
         verdict = "pass" if retry_passed else "fail"
         explanation, status = await self._explain(expected_outcome, result, passed=retry_passed)
 
@@ -92,6 +99,7 @@ class VerifierAgent:
             retry_error=retry_error,
             explanation=explanation,
             explanation_status=status,
+            screenshot_path=screenshot_path,
         )
 
     @staticmethod
@@ -109,19 +117,24 @@ class VerifierAgent:
         expected: dict,
         final_url: str | None,
         browser: BrowserSession | None,
-    ) -> tuple[bool, str | None]:
+        ticket_id: str,
+        domain: str,
+        workflow: str,
+    ) -> tuple[bool, str | None, str | None]:
         if browser is not None:
             try:
                 await asyncio.sleep(RECHECK_WAIT_SECONDS)
                 text = await browser.page.evaluate("() => document.body.innerText")
-                return self._check_assertion(expected, browser.page.url, text), None
+                passed = self._check_assertion(expected, browser.page.url, text)
+                screenshot_path = None if passed else await self._capture_screenshot(browser, ticket_id, domain, workflow)
+                return passed, None, screenshot_path
             except PlaywrightTimeoutError as exc:
-                return False, f"Re-check timed out: {exc}"
+                return False, f"Re-check timed out: {exc}", None
             except PlaywrightError as exc:
-                return False, f"Browser crashed during re-check: {exc}"
+                return False, f"Browser crashed during re-check: {exc}", None
 
         if not final_url:
-            return False, "No final URL to re-check."
+            return False, "No final URL to re-check.", None
 
         fresh = BrowserSession()
         try:
@@ -129,13 +142,26 @@ class VerifierAgent:
             await asyncio.wait_for(fresh.page.goto(final_url), timeout=RECHECK_NAV_TIMEOUT_SECONDS)
             await asyncio.sleep(RECHECK_WAIT_SECONDS)
             text = await fresh.page.evaluate("() => document.body.innerText")
-            return self._check_assertion(expected, fresh.page.url, text), None
+            passed = self._check_assertion(expected, fresh.page.url, text)
+            screenshot_path = None if passed else await self._capture_screenshot(fresh, ticket_id, domain, workflow)
+            return passed, None, screenshot_path
         except asyncio.TimeoutError:
-            return False, "Re-check navigation timed out."
+            return False, "Re-check navigation timed out.", None
         except PlaywrightError as exc:
-            return False, f"Browser crashed during re-check: {exc}"
+            return False, f"Browser crashed during re-check: {exc}", None
         finally:
             await fresh.close()
+
+    async def _capture_screenshot(self, browser: BrowserSession, ticket_id: str, domain: str, workflow: str) -> str | None:
+        try:
+            os.makedirs(self._screenshot_dir, exist_ok=True)
+            path = os.path.join(self._screenshot_dir, f"{ticket_id}_{domain}_{workflow}.png")
+            await browser.page.screenshot(path=path)
+            return path
+        except PlaywrightError:
+            # A crashed/closed browser can't be screenshotted either - the
+            # finding still gets reported, just without a screenshot.
+            return None
 
     async def _explain(
         self,
@@ -143,28 +169,19 @@ class VerifierAgent:
         result: ExplorationResult,
         passed: bool,
     ) -> tuple[str | None, str]:
-        if self._client is None:
+        if self._llm is None:
             return None, "skipped"
 
         prompt = self._explanation_prompt(expected, result, passed)
         try:
-            return await self._call_with_timeout(prompt, LLM_TIMEOUT_SECONDS), "ok"
-        except (TimeoutError, APIError):
+            response = await self._llm.complete(prompt, max_tokens=200, timeout=LLM_TIMEOUT_SECONDS)
+            return response.text, "ok"
+        except LLMError:
             try:
-                return await self._call_with_timeout(prompt, LLM_RETRY_TIMEOUT_SECONDS), "ok"
-            except (TimeoutError, APIError):
+                response = await self._llm.complete(prompt, max_tokens=200, timeout=LLM_RETRY_TIMEOUT_SECONDS)
+                return response.text, "ok"
+            except LLMError:
                 return None, "inconclusive"
-
-    async def _call_with_timeout(self, prompt: str, timeout: float) -> str:
-        response = await asyncio.wait_for(
-            self._client.messages.create(
-                model=VERIFIER_MODEL,
-                max_tokens=200,
-                messages=[{"role": "user", "content": prompt}],
-            ),
-            timeout=timeout,
-        )
-        return response.content[0].text.strip()
 
     @staticmethod
     def _explanation_prompt(expected: dict, result: ExplorationResult, passed: bool) -> str:

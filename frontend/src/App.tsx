@@ -1,11 +1,81 @@
-import MainLayout from "./layouts/MainLayout";
+import type { ReactNode } from "react";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { AuthProvider } from "./contexts/AuthContext";
+import ProtectedRoute from "./components/ProtectedRoute";
+import DashboardLayout from "./layouts/DashboardLayout";
+import Analytics from "./pages/Analytics";
+import Compare from "./pages/Compare";
 import Dashboard from "./pages/Dashboard";
+import History from "./pages/History";
+import HistoryReport from "./pages/HistoryReport";
+import LoginPage from "./pages/LoginPage";
+import RunTest from "./pages/RunTest";
+
+function ProtectedDashboard({ children }: { children: ReactNode }) {
+  return (
+    <ProtectedRoute>
+      <DashboardLayout>{children}</DashboardLayout>
+    </ProtectedRoute>
+  );
+}
 
 function App() {
   return (
-    <MainLayout>
-      <Dashboard />
-    </MainLayout>
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route
+            path="/"
+            element={
+              <ProtectedDashboard>
+                <Dashboard />
+              </ProtectedDashboard>
+            }
+          />
+          <Route
+            path="/run"
+            element={
+              <ProtectedDashboard>
+                <RunTest />
+              </ProtectedDashboard>
+            }
+          />
+          <Route
+            path="/history"
+            element={
+              <ProtectedDashboard>
+                <History />
+              </ProtectedDashboard>
+            }
+          />
+          <Route
+            path="/history/:id"
+            element={
+              <ProtectedDashboard>
+                <HistoryReport />
+              </ProtectedDashboard>
+            }
+          />
+          <Route
+            path="/compare"
+            element={
+              <ProtectedDashboard>
+                <Compare />
+              </ProtectedDashboard>
+            }
+          />
+          <Route
+            path="/analytics"
+            element={
+              <ProtectedDashboard>
+                <Analytics />
+              </ProtectedDashboard>
+            }
+          />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
   );
 }
 

@@ -4,7 +4,8 @@ workflows:
   - name: login
     steps:
       - Navigate to saucedemo.com
-      - Enter a valid username and password
+      - Enter "standard_user" into the Username field
+      - Enter "secret_sauce" into the Password field
       - Click the Login button
     expected_outcome:
       url_contains: /inventory.html
@@ -12,7 +13,10 @@ workflows:
 
   - name: add_to_cart
     steps:
-      - Log in with valid credentials
+      - Navigate to saucedemo.com
+      - Enter "standard_user" into the Username field
+      - Enter "secret_sauce" into the Password field
+      - Click the Login button
       - Click "Add to cart" on a product
       - Open the cart
     expected_outcome:
@@ -20,7 +24,12 @@ workflows:
 
   - name: checkout
     steps:
-      - Log in and add an item to the cart
+      - Navigate to saucedemo.com
+      - Enter "standard_user" into the Username field
+      - Enter "secret_sauce" into the Password field
+      - Click the Login button
+      - Click "Add to cart" on a product
+      - Open the cart
       - Go to checkout and fill in the shipping information
       - Complete the order
     expected_outcome:

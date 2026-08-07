@@ -1,0 +1,95 @@
+.analytics-page {
+  max-width: 1140px;
+}
+
+.analytics-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: var(--space-5);
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.analytics-title {
+  margin: 0 0 0.35rem;
+  font-size: var(--text-display);
+  font-weight: 700;
+}
+
+.analytics-subtitle {
+  color: var(--text);
+  font-size: var(--text-body);
+  margin: 0;
+}
+
+.analytics-range {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.analytics-range button {
+  padding: 7px 14px;
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.analytics-range button.active {
+  border-color: var(--accent-border);
+  background: var(--bg);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.analytics-error {
+  color: var(--status-critical);
+  font-size: 14px;
+}
+
+.analytics-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-4);
+}
+
+.analytics-panel {
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+}
+
+.analytics-panel-wide {
+  grid-column: 1 / -1;
+}
+
+.analytics-panel h3 {
+  margin: 0 0 var(--space-4);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-h);
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.analytics-note {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text);
+}
+
+@media (max-width: 780px) {
+  .analytics-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -1,0 +1,115 @@
+import { useState } from "react";
+import { AlertTriangle, Rocket, RotateCcw } from "lucide-react";
+import ComparisonSummary from "../components/ComparisonSummary";
+import ModelSelector from "../components/ModelSelector";
+import PipelineTimeline from "../components/PipelineTimeline";
+import ReportCard from "../components/ReportCard";
+import TalkingAgentsPanel from "../components/TalkingAgentsPanel";
+import { usePipelineRun } from "../hooks/usePipelineRun";
+import type { ModelChoice } from "../types/pipeline";
+import "./RunTest.css";
+
+function RunTest() {
+  const [ticketId, setTicketId] = useState("");
+  const [model, setModel] = useState<ModelChoice>("claude");
+  const { status, feed, stages, results, comparison, errorMessage, start, reset } = usePipelineRun();
+
+  const running = status === "connecting" || status === "running";
+  const resultList = Object.values(results);
+
+  return (
+    <div className="run-test-page">
+      <h1 className="run-test-title">Run a Test</h1>
+      <p className="run-test-subtitle">
+        Enter a Trello ticket ID for a registered website and pick which model(s) should drive the agents.
+      </p>
+
+      <div className="run-test-panel">
+        <form
+          className="run-test-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (ticketId.trim()) start(ticketId.trim(), model);
+          }}
+        >
+          <label className="run-test-field">
+            <span>Trello ticket ID</span>
+            <input
+              type="text"
+              value={ticketId}
+              onChange={(event) => setTicketId(event.target.value)}
+              placeholder="e.g. 66f2a1b3c9d4e5f6a7b8c9d0"
+              disabled={running}
+            />
+          </label>
+
+          <ModelSelector value={model} onChange={setModel} disabled={running} />
+
+          <div className="run-test-actions">
+            <button type="submit" disabled={running || !ticketId.trim()}>
+              <Rocket size={16} aria-hidden="true" />
+              {running ? "Running…" : "Start Test"}
+            </button>
+            {status !== "idle" && (
+              <button type="button" className="run-test-reset" onClick={reset} disabled={running}>
+                <RotateCcw size={13} aria-hidden="true" />
+                Reset
+              </button>
+            )}
+          </div>
+        </form>
+
+        {status !== "idle" && (
+          <div className="run-test-status-row">
+            <span className={`status-dot status-${status}`} />
+            <span>
+              {status === "connecting" && "Connecting…"}
+              {status === "running" && "Agents are working…"}
+              {status === "done" && "Run complete."}
+              {status === "error" && "Run failed."}
+            </span>
+          </div>
+        )}
+
+        {errorMessage && (
+          <div className="run-test-error">
+            <AlertTriangle size={14} aria-hidden="true" />
+            {errorMessage}
+          </div>
+        )}
+      </div>
+
+      {status !== "idle" && (
+        <div className="run-test-live">
+          <div className="run-test-live-column">
+            <h2 className="run-test-section-title">Timeline</h2>
+            <PipelineTimeline stages={stages} />
+          </div>
+          <div className="run-test-live-column run-test-live-column-wide">
+            <h2 className="run-test-section-title">Talking Agents</h2>
+            <TalkingAgentsPanel feed={feed} showProvider={Object.keys(stages).length > 1} />
+          </div>
+        </div>
+      )}
+
+      {resultList.length > 0 && (
+        <div className="run-test-reports">
+          <h2 className="run-test-section-title">Report{resultList.length > 1 ? "s" : ""}</h2>
+          <div className="run-test-report-grid">
+            {resultList.map((result) => (
+              <ReportCard result={result} key={result.provider} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {comparison && (
+        <div className="run-test-comparison">
+          <ComparisonSummary comparison={comparison} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default RunTest;

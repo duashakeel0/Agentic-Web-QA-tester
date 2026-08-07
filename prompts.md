@@ -172,3 +172,25 @@ Running log of significant AI prompts used to build this project, per the intern
 - A full mocked test suite exercising the real `VerifierAgent` code (not reimplemented logic) across: a clean pass needing no retry; a retry correctly filtering a one-off slow render (the same live page returns the right text a moment later); a deliberately broken step staying flagged as a real failure even after the retry; a browser crash mid-recheck producing a clean teardown and a specific error message instead of a hang; an LLM call timing out once and succeeding on the shorter retry; two consecutive LLM timeouts being marked `inconclusive` without ever silently flipping the underlying pass/fail verdict; and an incomplete exploration failing immediately without wasting a retry or an LLM call on it.
 - Additionally ran one real end-to-end pass through an actual live browser (not mocked) against a small test page with a deliberately introduced bug - a login button that navigates to the wrong page instead of showing the expected welcome text - and confirmed the Verifier correctly caught and flagged it as a failure after the retry, using the real Explorer→Verifier browser hand-off.
 - **Not yet completed:** live verification against all 3 real registered domains still depends on the same local Ollama setup Day 6 is waiting on.
+
+---
+
+## Day 8 — Reporter Agent & Email Notifications
+
+**Prompt:** Build the Reporter - it turns the Verifier's confirmed findings into one severity-ranked report with reproduction steps and a screenshot, writes it back to the originating ticket via `post_summary` with no manual step, and fires an immediate email alert for anything high-severity separately from the full report, since the point of an alert is escalation and not everything belongs in someone's inbox.
+
+**What was generated:**
+- `backend/app/agents/reporter.py` — `ReporterAgent`: takes a list of paired Explorer/Verifier outcomes (not just one - a real run, and the future Scheduler's nightly batch, can confirm several findings of different severities at once), classifies each confirmed failure's severity via Claude (defaulting to "high" if that classification call itself fails or times out - a broken classifier should never quietly downgrade a real bug), ranks findings highest-severity first, sends an email alert the moment a finding is confirmed high-severity rather than waiting for the whole report, then writes the combined summary back to the ticket via `post_summary` with one retry on failure - the local report is still returned even if the write-back never succeeds.
+- `backend/app/agents/email_sender.py` — a thin `smtplib` wrapper (`EmailSender`) so the Reporter never touches raw SMTP, raising a specific `EmailError` for missing config or a send failure instead of crashing the whole run.
+- `backend/app/agents/schema.py` — added `RunResult` (pairs one Explorer + Verifier outcome), `Finding`, and `Report`.
+- `backend/app/agents/verifier.py` — the Verifier now captures a screenshot of the live page the moment a failure is confirmed (best-effort - skipped if the browser's already crashed), since the Reporter's findings need one.
+- `backend/app/agents/run_reporter.py` — CLI chaining Planner → Explorer → Verifier → Reporter against a real ticket.
+- `backend/.env.example` / README — documents the SMTP env vars and the Reporter's run instructions.
+
+**What was checked/modified before accepting:**
+- A run with a deliberate mix of severities (high/medium/low) correctly ranks all three findings highest-first and sends exactly one alert email - for the high-severity one only
+- The alert email is fired at the moment its finding is confirmed, not batched with the rest of the report - verified by making the (mocked) Trello write-back artificially slow and confirming the email was already sent well before the run finished, comfortably inside the 5-second budget
+- `post_summary` retried exactly once on failure (2 total attempts, not more), correctly marked `failed` with the real error attached afterward, and confirmed the local report (all findings, reproduction steps, screenshots) still generates in full even though the write-back never succeeded
+- A severity-classification call that fails/times out defaults to "high" rather than silently dropping or downgrading a real finding, and still triggers its alert
+- Reproduction steps are built only from the real action sequence, excluding the deliberate broken-input attempts logged by the Explorer, so they actually reproduce the confirmed bug rather than the intentional bad-input detour
+- Re-ran the full Day 7 Verifier test suite after adding screenshot capture to confirm nothing regressed

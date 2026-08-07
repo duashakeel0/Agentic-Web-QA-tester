@@ -4,11 +4,12 @@ deciding each concrete browser action from the current page state rather
 than following a fixed script, so the same stored workflow keeps working
 even if a page's layout shifts slightly.
 
-Runs on a local model (Llama 3.1 via Ollama) rather than Claude: a single
+Runs on a pluggable LLMClient rather than a hardcoded provider: a single
 exploration makes one model call per browser action across every step and
-every broken-input attempt, so the call volume is high but any individual
-decision is low-stakes - if one action is slightly off, the loop guard and
-the step's action budget catch it well before it does real damage.
+every broken-input attempt, so whichever model the user picked for a run
+(Claude, Ollama, or both side by side) drives every one of those calls too -
+if one action is slightly off, the loop guard and the step's action budget
+catch it well before it does real damage.
 """
 
 import json
@@ -16,20 +17,33 @@ import json
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-from app.agents.ollama_client import OllamaClient, OllamaError
+from app.agents.claude_client import ClaudeLLMClient
+from app.agents.llm_client import LLMClient, LLMError
 from app.agents.schema import ActionLogEntry, ExplorationResult, TestPlan
 from app.browser import BrowserSession
 from app.domains.manifest import load_domains
 
 MAX_ACTIONS_PER_STEP = 6
 MAX_IDENTICAL_ACTION_REPEATS = 2
+# Playwright's default actionability timeout is 30s - fine for a real,
+# slow-loading element, but ruinous for a hallucinated/invalid selector
+# (the loop guard already caps an exploration at MAX_ACTIONS_PER_STEP
+# attempts, but at the default timeout a bad step could still burn minutes
+# waiting on failures that were never going to resolve). Kept short enough
+# that a real element still has time to appear.
+ACTION_TIMEOUT_MS = 5000
+NAVIGATE_TIMEOUT_MS = 15000
+# Decisions are one short JSON object with a one-sentence reasoning field -
+# capping generation this low keeps every one of the many per-action calls
+# fast without truncating a real response.
+DECISION_MAX_TOKENS = 200
 
 _NAVIGATION_ONLY_PREFIXES = ("navigate to", "wait for")
 
 _SNAPSHOT_JS = """
 () => Array.from(document.querySelectorAll(
   'input, textarea, select, button, a[href], [role="button"]'
-)).slice(0, 40).map((el) => ({
+)).slice(0, 25).map((el) => ({
   tag: el.tagName.toLowerCase(),
   type: el.getAttribute('type'),
   id: el.id || null,
@@ -47,9 +61,9 @@ class ExplorerError(Exception):
 
 
 class ExplorerAgent:
-    def __init__(self, browser: BrowserSession | None = None, ollama: OllamaClient | None = None) -> None:
+    def __init__(self, browser: BrowserSession | None = None, llm: LLMClient | None = None) -> None:
         self._browser = browser or BrowserSession()
-        self._ollama = ollama or OllamaClient()
+        self._llm = llm or ClaudeLLMClient()
 
     @property
     def browser(self) -> BrowserSession:
@@ -73,7 +87,10 @@ class ExplorerAgent:
 
         await self._browser.start()
         try:
-            await self._browser.page.goto(domain.base_url)
+            # BrowserSession.goto(), not page.goto() directly - it already
+            # waits on "domcontentloaded" instead of "load", which is what
+            # makes real-world sites that never cleanly fire "load" work.
+            await self._browser.goto(domain.base_url)
 
             for step in plan.steps:
                 if not broken_input_done and self._is_interactive_step(step):
@@ -117,17 +134,26 @@ class ExplorerAgent:
 
     async def _execute_action(self, action: str, selector: str | None, value: str | None) -> tuple[bool, str | None]:
         page = self._browser.page
+        # A model call can succeed but still omit a field the action actually
+        # needs (e.g. "navigate" with no URL) - checked explicitly so a
+        # missing field is a clean failed action, not a crash deep inside
+        # Playwright over a required-but-missing positional argument.
+        if action in ("fill", "click", "select", "press") and not selector:
+            return False, f"Model returned {action!r} with no selector."
+        if action == "navigate" and not value:
+            return False, "Model returned 'navigate' with no URL."
+
         try:
             if action == "fill":
-                await page.fill(selector, value or "")
+                await page.fill(selector, value or "", timeout=ACTION_TIMEOUT_MS)
             elif action == "click":
-                await page.click(selector)
+                await page.click(selector, timeout=ACTION_TIMEOUT_MS)
             elif action == "select":
-                await page.select_option(selector, value)
+                await page.select_option(selector, value, timeout=ACTION_TIMEOUT_MS)
             elif action == "press":
-                await page.press(selector, value or "Enter")
+                await page.press(selector, value or "Enter", timeout=ACTION_TIMEOUT_MS)
             elif action == "navigate":
-                await page.goto(value)
+                await page.goto(value, wait_until="domcontentloaded", timeout=NAVIGATE_TIMEOUT_MS)
             else:
                 return False, f"Unknown action type: {action!r}"
             return True, None
@@ -138,10 +164,13 @@ class ExplorerAgent:
 
     async def _execute_step(self, step: str, actions: list[ActionLogEntry]) -> None:
         seen_signatures: dict[tuple, int] = {}
+        step_actions: list[ActionLogEntry] = []
 
         for _ in range(MAX_ACTIONS_PER_STEP):
             snapshot = await self._snapshot()
-            decision = await self._ollama.decide(self._step_prompt(step, snapshot))
+            decision, _ = await self._llm.complete_json(
+                self._step_prompt(step, snapshot, step_actions), max_tokens=DECISION_MAX_TOKENS
+            )
             action = decision.get("action", "unknown")
 
             if action == "done":
@@ -158,25 +187,27 @@ class ExplorerAgent:
                 )
 
             success, error = await self._execute_action(action, selector, value)
-            actions.append(
-                ActionLogEntry(
-                    step=step,
-                    action=action,
-                    selector=selector,
-                    value=value,
-                    reasoning=decision.get("reasoning"),
-                    success=success,
-                    error=error,
-                )
+            entry = ActionLogEntry(
+                step=step,
+                action=action,
+                selector=selector,
+                value=value,
+                reasoning=decision.get("reasoning"),
+                success=success,
+                error=error,
             )
+            actions.append(entry)
+            step_actions.append(entry)
 
         raise ExplorerError(f"Explorer could not complete step {step!r} within {MAX_ACTIONS_PER_STEP} actions.")
 
     async def _attempt_broken_input(self, step: str, actions: list[ActionLogEntry]) -> None:
         snapshot = await self._snapshot()
         try:
-            decision = await self._ollama.decide(self._broken_input_prompt(step, snapshot))
-        except OllamaError as exc:
+            decision, _ = await self._llm.complete_json(
+                self._broken_input_prompt(step, snapshot), max_tokens=DECISION_MAX_TOKENS
+            )
+        except LLMError as exc:
             actions.append(
                 ActionLogEntry(
                     step=step,
@@ -205,13 +236,36 @@ class ExplorerAgent:
             )
         )
 
-    def _step_prompt(self, step: str, snapshot: dict) -> str:
+    def _step_prompt(self, step: str, snapshot: dict, step_actions: list[ActionLogEntry]) -> str:
+        nav_hint = ""
+        if not self._is_interactive_step(step):  # pure navigation/wait step
+            nav_hint = """
+This step needs no form interaction - it's only asking to be on the right
+page or for something to have finished loading, nothing more. If the current
+URL/page state above already satisfies it, respond with "done" immediately.
+Do NOT fill in, click, or otherwise interact with any form or element on the
+page for this step, even if the page shows a login form or other inputs -
+those belong to a later step, not this one.
+"""
+        history = ""
+        if step_actions:
+            done_list = "\n".join(
+                f'- {a.action} on {a.selector!r} with {a.value!r} -> {"succeeded" if a.success else f"FAILED: {a.error}"}'
+                for a in step_actions
+            )
+            history = f"""
+Actions already taken THIS step, in order - do not repeat one that already
+succeeded, the field/element is already in that state even if it's not
+obviously reflected below:
+{done_list}
+"""
+
         return f"""You are driving a real browser through one step of a QA workflow.
 This step is a human-written skeleton, not a fixed script - you must find and
 use the real elements on the current page to carry it out.
 
 Step: "{step}"
-
+{nav_hint}{history}
 Current page:
 URL: {snapshot["url"]}
 Title: {snapshot["title"]}
