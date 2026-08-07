@@ -1,7 +1,7 @@
 import pytest
 
 from app.agents.llm_client import LLMError
-from app.agents.schema import ExplorationResult
+from app.agents.schema import ActionLogEntry, ExplorationResult
 from app.agents.verifier import VerifierAgent
 from tests.helpers import FakeLLM
 
@@ -30,6 +30,31 @@ async def test_verify_passes_when_assertion_matches(verifier):
     assert verdict.initial_check_passed is True
     assert verdict.retried is False
     assert verdict.explanation_status == "ok"
+
+
+async def test_verify_passes_with_issues_when_actions_failed_but_end_state_is_correct(verifier):
+    verifier._llm.queue("Login succeeded after one retry on a slow field.")
+    failed_action = ActionLogEntry(step="Fill username", action="fill", selector="#u", success=False, error="timed out")
+    result = _exploration(actions=[failed_action])
+
+    verdict = await verifier.verify({"url_contains": "/inventory.html", "text_contains": "Products"}, result)
+
+    assert verdict.verdict == "pass_with_issues"
+    assert verdict.warning_count == 1
+
+
+async def test_verify_ignores_broken_input_probes_for_pass_with_issues(verifier):
+    verifier._llm.queue("Login succeeded; the deliberate bad-input probe correctly failed.")
+    probe = ActionLogEntry(
+        step="Fill username", action="fill", selector="#u", success=False, error="empty value rejected",
+        is_broken_input_attempt=True,
+    )
+    result = _exploration(actions=[probe])
+
+    verdict = await verifier.verify({"url_contains": "/inventory.html", "text_contains": "Products"}, result)
+
+    assert verdict.verdict == "pass"
+    assert verdict.warning_count == 0
 
 
 async def test_verify_fails_and_retries_when_no_browser_or_url_given(verifier):

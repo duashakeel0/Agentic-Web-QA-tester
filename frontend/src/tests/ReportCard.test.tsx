@@ -21,7 +21,7 @@ function passingResult(): PipelineResult {
       actions: [], final_url: "https://x/inventory.html", final_page_text: "Products", error: null,
     },
     verification: {
-      ticket_id: "T1", domain: "practice_software_testing", workflow: "login", verdict: "pass",
+      ticket_id: "T1", domain: "practice_software_testing", workflow: "login", verdict: "pass", warning_count: 0,
       assertion_checked: {}, initial_check_passed: true, retried: false, retry_passed: null,
       retry_error: null, explanation: null, explanation_status: "ok", screenshot_path: null,
     },
@@ -75,6 +75,28 @@ describe("ReportCard", () => {
     expect(screen.getByText("FAIL")).toBeInTheDocument();
     expect(screen.getByText(/Login button does not respond/)).toBeInTheDocument();
     expect(screen.getByText(/Timed out waiting for '#login-button'/)).toBeInTheDocument();
+  });
+
+  it("shows a PASS WITH ISSUES badge, not FAIL, when the run recovered from errors", () => {
+    const result = passingResult();
+    result.verification = { ...result.verification!, verdict: "pass_with_issues", warning_count: 1 };
+    result.report = {
+      ticket_id: "T1",
+      findings: [
+        {
+          ticket_id: "T1", domain: "practice_software_testing", workflow: "login", severity: "low",
+          summary: "Workflow completed and passed, but 1 action(s) failed or needed a retry along the way.",
+          error_message: null, reproduction_steps: [], screenshot_path: null, explanation: null,
+        },
+      ],
+      post_summary_status: "posted", post_summary_error: null,
+    };
+
+    render(<ReportCard result={result} />);
+
+    expect(screen.getByText("PASS WITH ISSUES")).toBeInTheDocument();
+    expect(screen.queryByText("FAIL")).not.toBeInTheDocument();
+    expect(screen.getByText(/1 action\(s\) failed or needed a retry/)).toBeInTheDocument();
   });
 
   it("hides agent outputs behind a toggle until clicked", async () => {

@@ -23,11 +23,15 @@ from app.agents.llm_client import LLMError
 from app.history.schema import HistoryDetail
 
 _PASS_COLOR_HEX = "#0ca30c"
+_WARN_COLOR_HEX = "#c98a1f"
 _FAIL_COLOR_HEX = "#d03b3b"
 _PASS_COLOR = colors.HexColor(_PASS_COLOR_HEX)
+_WARN_COLOR = colors.HexColor(_WARN_COLOR_HEX)
 _FAIL_COLOR = colors.HexColor(_FAIL_COLOR_HEX)
 _ACCENT = colors.HexColor("#4a3aa7")
 _GRID = colors.HexColor("#cccccc")
+
+_VERDICT_COLORS = {"pass": _PASS_COLOR, "pass_with_issues": _WARN_COLOR, "fail": _FAIL_COLOR}
 
 # Screenshots are served from main.py's /screenshots static mount, but the
 # PDF needs the real file on disk - this is that mount's target directory,
@@ -131,7 +135,7 @@ def build_pdf(entry: HistoryDetail, narrative: dict) -> bytes:
     report = result.get("report") or {}
     timings = result.get("timings") or []
     verdict = entry.verdict or "n/a"
-    verdict_color = _PASS_COLOR if verdict == "pass" else _FAIL_COLOR
+    verdict_color = _VERDICT_COLORS.get(verdict, _FAIL_COLOR)
 
     story = [
         Paragraph("SentinelQA Test Report", h1),
@@ -144,7 +148,7 @@ def build_pdf(entry: HistoryDetail, narrative: dict) -> bytes:
         ["Ticket title", plan.get("ticket_title") or "n/a"],
         ["Website / workflow", f"{entry.domain or 'n/a'} - {entry.workflow or 'n/a'}"],
         ["Model", entry.provider],
-        ["Verdict", verdict.upper()],
+        ["Verdict", verdict.replace("_", " ").upper()],
         ["Started", _fmt_ts(entry.started_at)],
         ["Finished", _fmt_ts(entry.finished_at)],
         ["Total duration", f"{entry.total_duration_ms / 1000:.1f}s"],

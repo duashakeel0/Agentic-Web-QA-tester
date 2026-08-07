@@ -209,7 +209,9 @@ function History() {
                   </td>
                   <td>
                     {entry.matched ? (
-                      <span className={`history-status history-status-${entry.verdict}`}>{entry.verdict?.toUpperCase()}</span>
+                      <span className={`history-status history-status-${entry.verdict}`}>
+                        {entry.verdict?.replace(/_/g, " ").toUpperCase()}
+                      </span>
                     ) : (
                       <span className="history-status history-status-unmatched">NO MATCH</span>
                     )}

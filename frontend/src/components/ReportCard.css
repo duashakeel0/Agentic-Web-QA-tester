@@ -12,6 +12,10 @@
   border-color: color-mix(in srgb, var(--status-good) 35%, var(--border));
 }
 
+.report-warn {
+  border-color: color-mix(in srgb, var(--status-warning) 35%, var(--border));
+}
+
 .report-fail,
 .report-unmatched {
   border-color: color-mix(in srgb, var(--status-critical) 35%, var(--border));
@@ -40,6 +44,11 @@
 .report-badge-pass {
   background: var(--status-good-bg);
   color: var(--status-good);
+}
+
+.report-badge-warn {
+  background: var(--status-warning-bg);
+  color: var(--status-warning);
 }
 
 .report-badge-fail {

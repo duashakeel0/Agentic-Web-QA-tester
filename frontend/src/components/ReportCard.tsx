@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -67,14 +68,28 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
     );
   }
 
-  const passed = verification?.verdict === "pass";
+  const verdict = verification?.verdict;
+  const isPass = verdict === "pass";
+  const isWarn = verdict === "pass_with_issues";
+  const isFail = !isPass && !isWarn; // covers "fail" and a missing verification
+
+  const cardClass = isFail ? "report-fail" : isWarn ? "report-warn" : "report-pass";
+  const badgeClass = isFail ? "report-badge-fail" : isWarn ? "report-badge-warn" : "report-badge-pass";
+  const badgeIcon = isFail ? (
+    <XCircle size={12} aria-hidden="true" />
+  ) : isWarn ? (
+    <AlertTriangle size={12} aria-hidden="true" />
+  ) : (
+    <CheckCircle2 size={12} aria-hidden="true" />
+  );
+  const badgeLabel = isFail ? "FAIL" : isWarn ? "PASS WITH ISSUES" : "PASS";
 
   return (
-    <div className={`report-card ${passed ? "report-pass" : "report-fail"}`}>
+    <div className={`report-card ${cardClass}`}>
       <div className="report-header">
-        <span className={`report-badge ${passed ? "report-badge-pass" : "report-badge-fail"}`}>
-          {passed ? <CheckCircle2 size={12} aria-hidden="true" /> : <XCircle size={12} aria-hidden="true" />}
-          {passed ? "PASS" : "FAIL"}
+        <span className={`report-badge ${badgeClass}`}>
+          {badgeIcon}
+          {badgeLabel}
         </span>
         <span className="report-provider">{PROVIDER_LABELS[result.provider]}</span>
         <span className="report-time">{(result.total_duration_ms / 1000).toFixed(1)}s total</span>
@@ -92,7 +107,7 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
         </p>
       </div>
 
-      {!passed && report && report.findings.length > 0 && (
+      {!isPass && report && report.findings.length > 0 && (
         <div className="report-section">
           <h4 className="report-section-title">Findings</h4>
           <div className="report-findings">
@@ -100,11 +115,14 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
               <div className={`finding-block finding-${finding.severity}`} key={i}>
                 <span className="finding-severity">{finding.severity.toUpperCase()}</span>
                 <p className="finding-line">
-                  <strong>Failed step:</strong> {exploration?.error ?? finding.reproduction_steps.at(-1) ?? "n/a"}
+                  <strong>{isFail ? "Failed step:" : "Note:"}</strong>{" "}
+                  {isFail ? (exploration?.error ?? finding.reproduction_steps.at(-1) ?? "n/a") : finding.summary}
                 </p>
-                <p className="finding-line">
-                  <strong>Failure reason:</strong> {finding.summary}
-                </p>
+                {isFail && (
+                  <p className="finding-line">
+                    <strong>Failure reason:</strong> {finding.summary}
+                  </p>
+                )}
                 {finding.error_message && (
                   <p className="finding-line">
                     <strong>Error message:</strong> {finding.error_message}
@@ -116,7 +134,7 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
         </div>
       )}
 
-      {passed && (
+      {isPass && (
         <div className="report-section">
           <p className="report-summary">
             <CheckCircle2 size={14} aria-hidden="true" className="report-line-icon" />

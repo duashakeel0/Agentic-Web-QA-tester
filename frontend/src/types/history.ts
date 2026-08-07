@@ -1,4 +1,4 @@
-import type { ComparisonReport, PipelineResult, Provider } from "./pipeline";
+import type { ComparisonReport, PipelineResult, Provider, Verdict } from "./pipeline";
 
 export interface HistoryEntry {
   id: number;
@@ -7,7 +7,7 @@ export interface HistoryEntry {
   workflow: string | null;
   provider: Provider;
   matched: boolean;
-  verdict: "pass" | "fail" | null;
+  verdict: Verdict | null;
   findings_count: number;
   total_duration_ms: number;
   estimated_cost_usd: number;

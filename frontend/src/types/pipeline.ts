@@ -1,6 +1,11 @@
 export type Provider = "claude" | "ollama";
 export type ModelChoice = Provider | "both";
 export type AgentName = "planner" | "explorer" | "verifier" | "reporter";
+// "pass_with_issues" - the run reached the correct final state, but one or
+// more real actions failed/needed a retry along the way. Distinct from
+// "fail" (final state was never reached) on purpose - not every hiccup is
+// a broken workflow.
+export type Verdict = "pass" | "pass_with_issues" | "fail";
 
 export interface TestPlan {
   ticket_id: string;
@@ -40,7 +45,8 @@ export interface VerifierResult {
   ticket_id: string;
   domain: string;
   workflow: string;
-  verdict: "pass" | "fail";
+  verdict: Verdict;
+  warning_count: number;
   assertion_checked: Record<string, unknown>;
   initial_check_passed: boolean;
   retried: boolean;
@@ -112,8 +118,8 @@ export interface ComparisonReport {
   faster_provider: Provider | null;
   time_difference_ms: number;
   verdict_agreement: boolean;
-  claude_verdict: "pass" | "fail" | null;
-  ollama_verdict: "pass" | "fail" | null;
+  claude_verdict: Verdict | null;
+  ollama_verdict: Verdict | null;
   claude_total_duration_ms: number;
   ollama_total_duration_ms: number;
   claude_findings_count: number;

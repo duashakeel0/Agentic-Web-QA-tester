@@ -238,6 +238,11 @@
   background: var(--status-good-bg);
 }
 
+.history-status-pass_with_issues {
+  color: var(--status-warning);
+  background: var(--status-warning-bg);
+}
+
 .history-status-fail {
   color: var(--status-critical);
   background: var(--status-critical-bg);

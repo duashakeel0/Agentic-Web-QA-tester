@@ -43,7 +43,11 @@ class VerifierResult(BaseModel):
     ticket_id: str
     domain: str
     workflow: str
-    verdict: str  # "pass" | "fail"
+    verdict: str  # "pass" | "pass_with_issues" | "fail"
+    # Real (non-broken-input-probe) actions that failed along the way but
+    # didn't stop the run from reaching the correct final state - what
+    # verdict="pass_with_issues" is based on. Always 0 for "pass"/"fail".
+    warning_count: int = 0
     assertion_checked: dict
     initial_check_passed: bool
     retried: bool

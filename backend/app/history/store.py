@@ -206,7 +206,13 @@ class HistoryStore:
         with self._connect() as conn:
             conn.row_factory = sqlite3.Row
             total = conn.execute("SELECT COUNT(*) AS c FROM runs").fetchone()["c"]
-            passed = conn.execute("SELECT COUNT(*) AS c FROM runs WHERE verdict = 'pass'").fetchone()["c"]
+            # pass_with_issues still counts as a pass here - the run genuinely
+            # reached the correct end state, it just took a hiccup or two to
+            # get there. The distinct badge/label survives in the per-run
+            # detail view; this is only the aggregate pass-rate stat.
+            passed = conn.execute(
+                "SELECT COUNT(*) AS c FROM runs WHERE verdict IN ('pass', 'pass_with_issues')"
+            ).fetchone()["c"]
             failed = conn.execute("SELECT COUNT(*) AS c FROM runs WHERE verdict = 'fail'").fetchone()["c"]
             unmatched = conn.execute("SELECT COUNT(*) AS c FROM runs WHERE matched = 0").fetchone()["c"]
             avg_duration = conn.execute("SELECT AVG(total_duration_ms) AS a FROM runs").fetchone()["a"] or 0.0
@@ -239,7 +245,7 @@ class HistoryStore:
         stats: list[ProviderStats] = []
         for provider, provider_rows in by_provider.items():
             run_count = len(provider_rows)
-            pass_count = sum(1 for r in provider_rows if r["verdict"] == "pass")
+            pass_count = sum(1 for r in provider_rows if r["verdict"] in ("pass", "pass_with_issues"))
             fail_count = sum(1 for r in provider_rows if r["verdict"] == "fail")
             avg_duration = sum(r["total_duration_ms"] for r in provider_rows) / run_count
             total_cost = sum(r["estimated_cost_usd"] for r in provider_rows)
@@ -288,7 +294,7 @@ class HistoryStore:
             day = time.strftime("%Y-%m-%d", time.gmtime(row["created_at"]))
             bucket = buckets.setdefault(day, {"total": 0, "passed": 0, "failed": 0, "cost": 0.0, "duration": 0.0})
             bucket["total"] += 1
-            if row["verdict"] == "pass":
+            if row["verdict"] in ("pass", "pass_with_issues"):
                 bucket["passed"] += 1
             elif row["verdict"] == "fail":
                 bucket["failed"] += 1

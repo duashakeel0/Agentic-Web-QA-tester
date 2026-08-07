@@ -52,8 +52,8 @@ function ComparisonSummary({
   const rows: { label: string; claude: string; ollama: string; winner?: "claude" | "ollama" }[] = [
     {
       label: "Verdict",
-      claude: comparison.claude_verdict?.toUpperCase() ?? "n/a",
-      ollama: comparison.ollama_verdict?.toUpperCase() ?? "n/a",
+      claude: comparison.claude_verdict?.replace(/_/g, " ").toUpperCase() ?? "n/a",
+      ollama: comparison.ollama_verdict?.replace(/_/g, " ").toUpperCase() ?? "n/a",
     },
     {
       label: "Time taken",

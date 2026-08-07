@@ -68,7 +68,7 @@ def _narrate(agent_name: str, result) -> str:
         return f"Completed the workflow in {len(result.actions)} action(s)."
     if agent_name == "verifier":
         suffix = f" {result.explanation}" if result.explanation else ""
-        return f"Verdict: {result.verdict.upper()}.{suffix}"
+        return f"Verdict: {result.verdict.replace('_', ' ').upper()}.{suffix}"
     if agent_name == "reporter":
         count = len(result.findings)
         return f"Report ready - {count} confirmed finding(s)." if count else "Report ready - no confirmed findings."

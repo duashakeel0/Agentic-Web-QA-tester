@@ -212,3 +212,34 @@ Running log of significant AI prompts used to build this project, per the intern
 - Full backend suite (147 tests) and frontend suite (14 tests) pass; `tsc`/`oxlint` clean
 - **Not yet completed, and worth flagging explicitly:** this sandbox's network egress is locked down to an allowlist that excludes these sites, so routes/success text were sourced from web search (each site's own test-case docs, well-known public test suites against them) rather than by loading the live pages directly - confidence is high for automationexercise.com and ParaBank's page-level flow (both extremely well-documented, stable QA-practice targets), lower for exact wording on practicesoftwaretesting.com's cart/checkout copy. ParaBank also has no fixed public login (unlike Sauce Demo) - its `login`/`transfer_funds`/`pay_bill` workflows have placeholder credentials that need a real registered ParaBank account swapped in before they'll pass. All of this needs a real local run to confirm, the same way Day 6/7's Ollama-dependent live verification did.
 - Re-ran the full Day 7 Verifier test suite after adding screenshot capture to confirm nothing regressed
+
+---
+
+## Pass-with-issues verdict
+
+**Context:** A run that reached the correct final state but hit a recoverable error along the way (a field that needed a retry, one action that failed but didn't derail the workflow) was being reported as an outright FAIL - the same category as a run that never got there at all. That conflates "something is genuinely broken" with "it worked, imperfectly," which loses real signal and makes minor hiccups look like blocking bugs.
+
+**Prompt:** Give the Verifier a third verdict - `pass_with_issues` - for exactly the case where the final expected outcome is reached but one or more real (non-broken-input-probe) actions failed on the way there. Wire it through the Reporter (a low-severity informational finding, never an email alert), the Trello comment, the PDF report, and the dashboard (a third amber badge next to PASS/FAIL everywhere a verdict is shown), and count it as a pass for aggregate stats (pass rate, daily chart) since the workflow genuinely completed correctly.
+
+**What was generated:**
+- `backend/app/agents/schema.py` - `VerifierResult.warning_count`, `verdict` now `"pass" | "pass_with_issues" | "fail"`
+- `backend/app/agents/verifier.py` - counts real action failures (excluding deliberate broken-input probes); if the final assertion holds despite them, verdict is `pass_with_issues`, never `fail`
+- `backend/app/agents/reporter.py` - generates a low-severity finding for `pass_with_issues` without an LLM classification call or an alert email; fixed `_render_summary`'s pass/fail split, which previously miscounted anything not exactly "pass" as failed
+- `backend/app/history/store.py`, `backend/app/pdf_report.py` - `pass_with_issues` counts toward the aggregate pass rate; PDF verdict color gets a third (amber) option
+- Frontend: `types/pipeline.ts`/`types/history.ts` get a shared `Verdict` type; `ReportCard`, `Dashboard`, `History`, `ComparisonSummary` all render a third "PASS WITH ISSUES" badge instead of forcing a binary pass/fail
+
+**What was checked/modified before accepting:**
+- New Verifier unit tests: a run with one failed action but a correct final state gets `pass_with_issues`; a deliberate broken-input probe failing does NOT trigger it (still a clean `pass`)
+- New Reporter unit tests: `pass_with_issues` produces exactly one low-severity finding with no LLM call and no alert email; `_render_summary`'s pass/fail counts no longer misclassify it
+- New ReportCard test: a `pass_with_issues` result renders the amber badge, never the FAIL badge
+- Full backend suite (152 tests) and frontend suite (15 tests) pass; `tsc`/`oxlint` clean
+
+---
+
+## Domain knowledge model clarification - goal vs. steps vs. ticket
+
+**Context:** Mid-build, tried collapsing each domain's workflow from a detailed step list down to one autonomous goal sentence, on the read that "the agent should know the steps itself, not be told." Corrected: the proposal's domain knowledge model already has the agent finding the real element for each step itself (Section 5) - what it doesn't do is invent the step *sequence* from nothing. The domain YAML stays the detailed, known-correct flow a human tester would follow (per Section 7, verbatim); a ticket is what tells the Planner *which* registered workflow to run, not a restatement of its steps.
+
+**What was generated:** Reverted the single-goal collapse - `parabank.yaml`, `practice_software_testing.yaml`, `automation_exercise.yaml`, `campushub.yaml` all went back to their detailed step lists, and `explorer.py`'s prompt/`MAX_ACTIONS_PER_STEP` reverted to the original step-at-a-time framing (byte-identical to before the collapse, confirmed via `git diff`).
+
+**What was checked/modified before accepting:** All 4 domains reload correctly with the restored steps; full backend suite (152 tests) passes.

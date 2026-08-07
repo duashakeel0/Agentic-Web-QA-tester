@@ -2,8 +2,13 @@
 # specifically for automation practice (no real money/accounts). Unlike
 # Sauce Demo it has no fixed shared login - REPLACE_WITH_* below must be
 # swapped for a real account's credentials (register once at
-# https://parabank.parasoft.com/parabank/register.htm) before the
-# login/transfer_funds/pay_bill workflows will actually pass.
+# https://parabank.parasoft.com/parabank/register.htm) before these
+# workflows will actually pass.
+#
+# Steps are the known-correct flow a human tester would follow, exactly
+# per the proposal's domain knowledge model - the Explorer still finds the
+# real element for each step itself from the live page, it just doesn't
+# invent the overall flow/order from nothing.
 name: parabank
 base_url: https://parabank.parasoft.com/parabank/index.htm
 workflows:

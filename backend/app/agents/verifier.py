@@ -66,6 +66,7 @@ class VerifierAgent:
             )
 
         initial_passed = self._check_assertion(expected_outcome, result.final_url, result.final_page_text)
+        error_count = self._count_errors(result)
 
         if initial_passed:
             explanation, status = await self._explain(expected_outcome, result, passed=True)
@@ -73,7 +74,8 @@ class VerifierAgent:
                 ticket_id=result.ticket_id,
                 domain=result.domain,
                 workflow=result.workflow,
-                verdict="pass",
+                verdict=self._verdict_for_pass(error_count),
+                warning_count=error_count,
                 assertion_checked=expected_outcome,
                 initial_check_passed=True,
                 retried=False,
@@ -84,7 +86,7 @@ class VerifierAgent:
         retry_passed, retry_error, screenshot_path = await self._recheck(
             expected_outcome, result.final_url, browser, result.ticket_id, result.domain, result.workflow
         )
-        verdict = "pass" if retry_passed else "fail"
+        verdict = self._verdict_for_pass(error_count) if retry_passed else "fail"
         explanation, status = await self._explain(expected_outcome, result, passed=retry_passed)
 
         return VerifierResult(
@@ -92,6 +94,7 @@ class VerifierAgent:
             domain=result.domain,
             workflow=result.workflow,
             verdict=verdict,
+            warning_count=error_count if retry_passed else 0,
             assertion_checked=expected_outcome,
             initial_check_passed=False,
             retried=True,
@@ -101,6 +104,21 @@ class VerifierAgent:
             explanation_status=status,
             screenshot_path=screenshot_path,
         )
+
+    @staticmethod
+    def _verdict_for_pass(error_count: int) -> str:
+        # The end state is genuinely correct either way - the only question
+        # is whether it got there cleanly. A user shouldn't read "FAILED"
+        # for a run that actually reached the right outcome; a handful of
+        # recovered hiccups along the way is a real signal worth surfacing,
+        # just not one that should read as a broken workflow.
+        return "pass" if error_count == 0 else "pass_with_issues"
+
+    @staticmethod
+    def _count_errors(result: ExplorationResult) -> int:
+        # Deliberate broken-input probes are SUPPOSED to fail - excluded so
+        # intentional negative testing never counts against a clean run.
+        return sum(1 for a in result.actions if not a.success and not a.is_broken_input_attempt)
 
     @staticmethod
     def _check_assertion(expected: dict, url: str | None, text: str | None) -> bool:

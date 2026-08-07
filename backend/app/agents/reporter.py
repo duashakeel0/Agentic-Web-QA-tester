@@ -46,7 +46,15 @@ class ReporterAgent:
         findings: list[Finding] = []
 
         for run in runs:
-            if run.verification.verdict != "fail":
+            verdict = run.verification.verdict
+            if verdict == "pass":
+                continue
+            if verdict == "pass_with_issues":
+                # The end state was genuinely correct - this isn't a bug to
+                # classify, just worth surfacing that it wasn't clean. No
+                # LLM call, no alert; a recovered hiccup on an otherwise
+                # passing run doesn't need either.
+                findings.append(self._minor_issues_finding(run))
                 continue
             finding = await self._classify(run)
             findings.append(finding)
@@ -76,6 +84,24 @@ class ReporterAgent:
             summary=summary,
             error_message=self._error_message(exploration, verification),
             reproduction_steps=self._reproduction_steps(exploration),
+            screenshot_path=verification.screenshot_path,
+            explanation=verification.explanation,
+        )
+
+    @staticmethod
+    def _minor_issues_finding(run: RunResult) -> Finding:
+        exploration, verification = run.exploration, run.verification
+        return Finding(
+            ticket_id=exploration.ticket_id,
+            domain=exploration.domain,
+            workflow=exploration.workflow,
+            severity="low",
+            summary=(
+                f"Workflow completed and passed, but {verification.warning_count} action(s) "
+                "failed or needed a retry along the way."
+            ),
+            error_message=ReporterAgent._error_message(exploration, verification),
+            reproduction_steps=ReporterAgent._reproduction_steps(exploration),
             screenshot_path=verification.screenshot_path,
             explanation=verification.explanation,
         )
@@ -173,17 +199,26 @@ Respond with ONLY a JSON object, no other text, in exactly this shape:
         failure reason and raw error message - not just a list of bugs
         with no indication of what passed."""
         passed = [r for r in runs if r.verification.verdict == "pass"]
-        failed = [r for r in runs if r.verification.verdict != "pass"]
+        passed_with_issues = [r for r in runs if r.verification.verdict == "pass_with_issues"]
+        failed = [r for r in runs if r.verification.verdict == "fail"]
 
+        overall = "FAIL" if failed else ("PASS WITH ISSUES" if passed_with_issues else "PASS")
         lines = [
-            f"Result: {'FAIL' if failed else 'PASS'}",
-            f"Testing summary: {len(passed)} passed, {len(failed)} failed out of {len(runs)} workflow(s) tested.",
+            f"Result: {overall}",
+            f"Testing summary: {len(passed)} passed, {len(passed_with_issues)} passed with issues, "
+            f"{len(failed)} failed out of {len(runs)} workflow(s) tested.",
             "",
         ]
         for run in passed:
             lines.append(
                 f"[PASS] {run.exploration.domain}/{run.exploration.workflow} - "
                 f"completed in {len(run.exploration.actions)} action(s)."
+            )
+        for run in passed_with_issues:
+            lines.append(
+                f"[PASS WITH ISSUES] {run.exploration.domain}/{run.exploration.workflow} - "
+                f"completed in {len(run.exploration.actions)} action(s), "
+                f"{run.verification.warning_count} recovered error(s) along the way."
             )
 
         if not report.findings:

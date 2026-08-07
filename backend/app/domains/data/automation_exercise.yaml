@@ -1,9 +1,9 @@
 # automationexercise.com - a demo e-commerce site built specifically for
-# QA automation practice. Deliberately excludes a "create account" workflow
-# since account registration isn't idempotent (a fixed email address only
+# QA automation practice. Steps are the known-correct flow a human tester
+# would follow. Deliberately excludes a "create account" workflow since
+# account registration isn't idempotent (a fixed email address only
 # succeeds once - every run after the first would fail on "Email Address
-# already exist!"), which would make it fail on every re-run after the
-# first, unlike the workflows below.
+# already exist!"), unlike the workflows below.
 name: automation_exercise
 base_url: https://automationexercise.com
 workflows:

@@ -1,5 +1,6 @@
 # practicesoftwaretesting.com ("Toolshop") - a demo hardware-store webshop
-# built specifically for QA automation practice. The login workflow uses
+# built specifically for QA automation practice. Steps are the
+# known-correct flow a human tester would follow. The login workflow uses
 # the site's own published demo customer account.
 name: practice_software_testing
 base_url: https://practicesoftwaretesting.com

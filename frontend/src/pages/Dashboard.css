@@ -297,6 +297,11 @@
   box-shadow: 0 0 0 4px var(--status-good-bg);
 }
 
+.status-pass_with_issues {
+  background: var(--status-warning);
+  box-shadow: 0 0 0 4px var(--status-warning-bg);
+}
+
 .status-error,
 .status-fail {
   background: var(--status-critical);

@@ -427,7 +427,7 @@ function Dashboard() {
                   </div>
                   <div className="dash-history-right">
                     <span className={`dash-history-status status-${run.verdict ?? "unmatched"}`}>
-                      {run.verdict?.toUpperCase() ?? "N/A"}
+                      {run.verdict ? run.verdict.replace(/_/g, " ").toUpperCase() : "N/A"}
                     </span>
                     <span className="dash-history-time">{formatDate(run.created_at)}</span>
                   </div>
