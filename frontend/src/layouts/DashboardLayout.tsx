@@ -1,4 +1,4 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   BarChart3,
@@ -17,6 +17,8 @@ import {
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import { useAppTheme } from "../hooks/useAppTheme";
+import { apiGet } from "../services/api";
+import type { SiteStats } from "../types/history";
 import "./DashboardLayout.css";
 
 const NAV_ITEMS = [
@@ -46,6 +48,16 @@ function DashboardLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === "1");
+  const [siteStats, setSiteStats] = useState<SiteStats[]>([]);
+
+  useEffect(() => {
+    // Best-effort - a stale/expired token here just leaves the sidebar
+    // widget empty rather than forcing a logout; the page's own data
+    // fetch (if any) already owns that flow.
+    apiGet<SiteStats[]>("/api/history/site-stats")
+      .then(setSiteStats)
+      .catch(() => {});
+  }, []);
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
@@ -89,6 +101,20 @@ function DashboardLayout({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
+
+        {siteStats.length > 0 && (
+          <div className="sidebar-site-stats">
+            <div className="agent-status-header">
+              <span className="sidebar-section-label">Sites Tested</span>
+            </div>
+            {siteStats.slice(0, 5).map((site) => (
+              <div className="site-stats-row" key={site.domain} title={`${site.domain} - tested ${site.run_count} time(s)`}>
+                <span className="site-stats-name">{site.domain}</span>
+                <span className="site-stats-count">{site.run_count}×</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="sidebar-agent-status">
           <div className="agent-status-header">
