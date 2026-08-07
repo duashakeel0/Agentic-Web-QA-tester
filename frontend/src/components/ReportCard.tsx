@@ -16,10 +16,51 @@ import {
 } from "lucide-react";
 import { API_BASE_URL } from "../config";
 import { downloadFile } from "../services/api";
-import type { PipelineResult, Provider } from "../types/pipeline";
+import type { ActionLogEntry, ExplorationResult, PipelineResult, Provider, TestPlan } from "../types/pipeline";
+import DonutChart from "./charts/DonutChart";
 import "./ReportCard.css";
 
 const PROVIDER_LABELS: Record<Provider, string> = { claude: "Claude", ollama: "Llama (Ollama)" };
+
+type StepStatus = "PASS" | "FAIL" | "SKIPPED" | "NOT REACHED";
+
+interface StepRow {
+  step: string;
+  status: StepStatus;
+  note: string;
+}
+
+/** One row per planned test step, derived entirely from the real action
+ * log - mirrors backend/app/pdf_report.py's _step_rows() so the on-screen
+ * report and the downloaded PDF agree on what happened. A step with no
+ * actions at all is either "skipped" (already satisfied when the page
+ * loaded, only possible for a completed run) or "not reached" (exploration
+ * stopped before it). */
+function buildStepRows(plan: TestPlan, exploration: ExplorationResult | undefined): StepRow[] {
+  const actions = exploration?.actions ?? [];
+  const completed = exploration?.completed ?? false;
+
+  return plan.steps.map((step) => {
+    const stepActions = actions.filter((a: ActionLogEntry) => a.step === step && !a.is_broken_input_attempt);
+    if (stepActions.length === 0) {
+      return completed
+        ? { step, status: "SKIPPED", note: "Already satisfied when the page loaded - no action needed." }
+        : { step, status: "NOT REACHED", note: "Exploration stopped before this step was attempted." };
+    }
+    const last = stepActions[stepActions.length - 1];
+    if (last.success) {
+      return { step, status: "PASS", note: `Completed successfully in ${stepActions.length} action(s).` };
+    }
+    return { step, status: "FAIL", note: last.error ?? "Action failed with no further detail." };
+  });
+}
+
+const STEP_STATUS_CLASS: Record<StepStatus, string> = {
+  PASS: "step-status-pass",
+  FAIL: "step-status-fail",
+  SKIPPED: "step-status-skip",
+  "NOT REACHED": "step-status-skip",
+};
 
 function DownloadReportButton({ historyId, ticketId }: { historyId: number; ticketId: string }) {
   const [downloading, setDownloading] = useState(false);
@@ -106,6 +147,71 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
           <strong>Ticket:</strong>&nbsp;{plan.ticket_id} {plan.ticket_title ? `- ${plan.ticket_title}` : ""}
         </p>
       </div>
+
+      {metrics && metrics.actions_attempted > 0 && (
+        <div className="report-section">
+          <h4 className="report-section-title">Test Execution Summary</h4>
+          <div className="report-summary-row">
+            <DonutChart
+              centerLabel="Actions passed"
+              segments={[
+                { label: "Passed", value: metrics.actions_succeeded, color: "var(--status-good)" },
+                { label: "Failed", value: metrics.actions_attempted - metrics.actions_succeeded, color: "var(--status-critical)" },
+              ]}
+            />
+            <dl className="report-summary-stats">
+              <div>
+                <dt>Total test steps</dt>
+                <dd>{plan.steps.length}</dd>
+              </div>
+              <div>
+                <dt>Steps covered</dt>
+                <dd>
+                  {metrics.steps_covered}/{metrics.steps_planned}
+                </dd>
+              </div>
+              <div>
+                <dt>Actions attempted</dt>
+                <dd>{metrics.actions_attempted}</dd>
+              </div>
+              <div>
+                <dt>Pass rate</dt>
+                <dd>{Math.round(metrics.accuracy_ratio * 100)}%</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      )}
+
+      {plan.steps.length > 0 && (
+        <div className="report-section">
+          <h4 className="report-section-title">Test Case Execution Details</h4>
+          <div className="report-steps-table-wrap">
+            <table className="report-steps-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Test Step</th>
+                  <th>Status</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {buildStepRows(plan, exploration).map((row, i) => (
+                  <tr key={i}>
+                    <td>{i + 1}</td>
+                    <td>{row.step}</td>
+                    <td>
+                      <span className={`step-status ${STEP_STATUS_CLASS[row.status]}`}>{row.status}</span>
+                    </td>
+                    <td className="report-steps-note">{row.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {!isPass && report && report.findings.length > 0 && (
         <div className="report-section">

@@ -99,6 +99,67 @@ describe("ReportCard", () => {
     expect(screen.getByText(/1 action\(s\) failed or needed a retry/)).toBeInTheDocument();
   });
 
+  it("renders a Test Case Execution Details table derived from the action log", () => {
+    const result = passingResult();
+    result.plan = basePlan({ steps: ["Navigate to the homepage", "Log in with valid credentials"] });
+    result.exploration = {
+      ...result.exploration!,
+      completed: true,
+      actions: [
+        { step: "Log in with valid credentials", action: "fill", selector: "#user", value: "bob", reasoning: null, success: true, error: null, is_broken_input_attempt: false, screenshot_path: null },
+      ],
+    };
+
+    render(<ReportCard result={result} />);
+
+    // Step 1 had no actions but the run completed - reads as skipped
+    // (already satisfied), not as a failure.
+    expect(screen.getByText("Navigate to the homepage")).toBeInTheDocument();
+    expect(screen.getByText("Log in with valid credentials")).toBeInTheDocument();
+    expect(screen.getByText("SKIPPED")).toBeInTheDocument();
+    expect(screen.getAllByText("PASS").length).toBeGreaterThan(0); // badge + step status
+  });
+
+  it("shows a FAIL step status distinct from a SKIPPED one for the same run", () => {
+    const result = failingResult();
+    result.plan = basePlan({ steps: ["Log in"] });
+    result.exploration = {
+      ...result.exploration!,
+      completed: false,
+      actions: [
+        { step: "Log in", action: "click", selector: "#login-button", value: null, reasoning: null, success: false, error: "Timed out", is_broken_input_attempt: false, screenshot_path: null },
+      ],
+    };
+
+    render(<ReportCard result={result} />);
+
+    const failStatuses = screen.getAllByText("FAIL");
+    // The header badge and the step-table status cell both say "FAIL".
+    expect(failStatuses.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("Timed out")).toBeInTheDocument();
+  });
+
+  it("renders a Test Execution Summary donut once metrics are available", () => {
+    const result = passingResult();
+    result.metrics = {
+      steps_planned: 4, steps_covered: 4, coverage_ratio: 1, missed_steps: [],
+      actions_attempted: 5, actions_succeeded: 4, accuracy_ratio: 0.8,
+      llm_call_count: 5, input_tokens: 100, output_tokens: 50, estimated_cost_usd: 0.01,
+    };
+
+    render(<ReportCard result={result} />);
+
+    expect(screen.getByText("Test Execution Summary")).toBeInTheDocument();
+    expect(screen.getByText("Passed (4)")).toBeInTheDocument();
+    expect(screen.getByText("Failed (1)")).toBeInTheDocument();
+  });
+
+  it("skips the Test Execution Summary section when there are no metrics", () => {
+    render(<ReportCard result={passingResult()} />);
+
+    expect(screen.queryByText("Test Execution Summary")).not.toBeInTheDocument();
+  });
+
   it("hides agent outputs behind a toggle until clicked", async () => {
     const user = userEvent.setup();
     const result = failingResult();

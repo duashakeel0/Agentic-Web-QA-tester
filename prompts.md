@@ -473,3 +473,22 @@ Running log of significant AI prompts used to build this project, per the intern
 - Confirmed the existing "leaves a real CSS selector alone" test still passes - a bare-id-shaped selector with no near-miss in the snapshot falls through unchanged, same as before.
 - Full backend suite (192 tests, +3) passes.
 - **Not yet completed:** same general caveat as every accuracy fix so far - this closes one specific, common near-miss (case-only mismatch on an otherwise-correct id), not selector accuracy in general. A completely wrong id, or a case mismatch combined with something else off, would still fail. Worth another real run to see how far through the workflow it gets now.
+
+---
+
+## Redesigning the report to look like a real QA test report
+
+**Context:** After several rounds of chasing model-accuracy bugs (and deciding to move on from Ollama debugging for now), turned to the actual deliverable: the downloadable PDF and on-screen report were functionally complete (verdict, findings, metrics, a couple of charts, screenshots) but read as an ad-hoc data dump rather than a QA report anyone would recognize as one - no step-by-step test case table, no expected-vs-actual block, no pass/fail visual summary, generic section ordering.
+
+**Prompt:** "these reports are so basic, make them exactly how QA testing reports look like, but keep tables charts and graphs in it."
+
+**What was generated:**
+- `backend/app/pdf_report.py` - restructured into standard, numbered QA report sections: (1) Test Information (ticket, module/feature under test, test type, model/agent, timing, cost, overall result), (2) Test Execution Summary (a pass/fail donut chart of actions attempted, alongside a counts table - total/passed/failed/skipped steps, pass rate), (3) Expected vs. Actual Outcome (the workflow's `expected_outcome` rendered in plain English next to the Verifier's actual explanation and result), (4) Summary & Analysis (the existing Claude-written narrative, kept), (5) **Test Case Execution Details** - the core addition: a real step-by-step table (Step #, the exact step text, PASS/FAIL/SKIPPED/NOT REACHED, a short note) built entirely from `plan.steps` cross-referenced against the real action log, not fabricated - a step with zero actions reads "skipped" only if the whole run completed (the deterministic first-step homepage skip from earlier), otherwise "not reached", (6) Quality Metrics (existing bar chart, kept), (7) Defects/Findings (existing table, now with auto-numbered `DEF-001`-style IDs), (8) Stage Timings (kept), (9) Evidence/Screenshots (kept).
+- `frontend/src/components/ReportCard.tsx` - added the same two new sections to the on-screen card: a "Test Execution Summary" reusing the dashboard's own `DonutChart` component (visual consistency, not a new chart style) for actions passed/failed plus a small stats grid, and a real "Test Case Execution Details" `<table>` (Step #/Description/Status/Notes) built by a `buildStepRows()` helper that mirrors the PDF's Python logic exactly, so the on-screen view and the downloaded PDF never disagree about what happened.
+
+**What was checked/modified before accepting:**
+- Rendered a full sample PDF locally (via `Read` on the generated file, which can view a PDF's rendered pages directly) and eyeballed the actual layout, not just "did reportlab throw" - confirmed the numbered sections, table alignment, donut/bar charts, and color-coded statuses all render as intended before calling it done.
+- New backend tests: `_format_expected_outcome` for both-fields/none/empty; `_step_rows` for all four statuses (pass, fail, skipped-because-completed, not-reached-because-incomplete) and confirms deliberate broken-input probes are excluded from step status (never mistaken for a real failed attempt); a full realistic-fixture `build_pdf` smoke test exercising every new section together, not just an empty/minimal run.
+- New frontend tests: the step table renders real step text and computes SKIPPED vs PASS vs FAIL correctly from the action log; the Test Execution Summary donut appears once metrics exist and is absent when they don't (an unmatched/pre-metrics report shouldn't show an empty chart).
+- Full backend suite (198 tests, +6) and frontend suite (28 tests, +4) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** haven't seen this rendered against a real completed run with real screenshots/findings/multiple steps in the actual browser dashboard - the sample PDF and the component tests both use hand-built fixtures, not a live pipeline result.
