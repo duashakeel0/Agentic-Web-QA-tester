@@ -168,7 +168,13 @@ async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | 
         )
 
     async def on_action(event: dict) -> None:
-        await _emit(on_event, {"type": "action", "provider": provider, "agent": "explorer", **event})
+        # The Explorer tags each event "action" (a discrete, model-decided
+        # browser action - goes in the action log/filmstrip/report) or
+        # "frame" (a background live-view tick on a fixed interval, purely
+        # visual, never logged) - forwarded here as the WS event's own
+        # "type" so the two render differently on the dashboard.
+        event_type = event.pop("kind", "action")
+        await _emit(on_event, {"type": event_type, "provider": provider, "agent": "explorer", **event})
 
     explorer = ExplorerAgent(llm=llm, on_action=on_action)
     exploration = await timed("explorer", explorer.explore(plan, close_browser=False))

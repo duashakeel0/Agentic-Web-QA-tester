@@ -1,9 +1,13 @@
+import asyncio
+import contextlib
+
 import pytest
 
 from app.agents import explorer as explorer_module
 from app.agents.explorer import ExplorerAgent, ExplorerError
 from app.agents.llm_client import LLMError
 from app.agents.schema import ActionLogEntry, TestPlan
+from app.domains.schema import Domain
 from tests.helpers import FakeLLM
 
 _SNAPSHOT_ELEMENTS = [
@@ -27,22 +31,70 @@ class _FakeBrowser:
     page = object()
 
 
+class _FakeLocator:
+    """Enough of Playwright's Locator to exercise _element_box - .first
+    just returns itself (a single-match locator has no chaining to do),
+    matching real Locator semantics closely enough for this."""
+
+    def __init__(self, box: dict | None):
+        self._box = box
+
+    @property
+    def first(self):
+        return self
+
+    async def bounding_box(self, timeout=None):
+        return self._box
+
+
 class _FakePage:
-    def __init__(self):
+    def __init__(self, boxes: dict[str, dict | None] | None = None):
         self.viewport_size = {"width": 1280, "height": 720}
         self.screenshot_calls = 0
+        self.url = "http://x"
+        self._boxes = boxes or {}
 
     async def screenshot(self):
         self.screenshot_calls += 1
         return b"fake-png-bytes"
+
+    def locator(self, selector: str) -> _FakeLocator:
+        return _FakeLocator(self._boxes.get(selector))
+
+    async def evaluate(self, _script):
+        return ""
+
+    async def title(self):
+        return "t"
 
 
 class _FakeBrowserWithScreenshot:
     """Enough of BrowserSession's shape to exercise _emit_action's
     screenshot capture without a real Playwright page."""
 
+    def __init__(self, boxes: dict[str, dict | None] | None = None):
+        self.page = _FakePage(boxes)
+
+
+class _FakeBrowserFull:
+    """Enough of BrowserSession's shape to run explore() end-to-end - not
+    just _emit_action in isolation - without a real Playwright browser.
+    start/goto/close all just flip flags/fields."""
+
     def __init__(self):
+        self.started = False
+        self.closed = False
         self.page = _FakePage()
+
+    async def start(self):
+        self.started = True
+
+    async def goto(self, url):
+        self.page.url = url
+        return "t"
+
+    async def close(self):
+        self.closed = True
 
 
 @pytest.fixture
@@ -178,7 +230,7 @@ async def test_emit_action_sends_screenshot_and_target_box(tmp_path, monkeypatch
     async def on_action(event: dict) -> None:
         events.append(event)
 
-    fake_browser = _FakeBrowserWithScreenshot()
+    fake_browser = _FakeBrowserWithScreenshot(boxes={"#user-name": {"x": 10, "y": 20, "width": 200, "height": 30}})
     agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM(), on_action=on_action)
     agent._llm.queue('{"action": "fill", "selector": "user-name", "value": "bob", "reasoning": "fill it"}')
     agent._llm.queue('{"action": "done", "selector": null, "value": null, "reasoning": "done"}')
@@ -245,13 +297,25 @@ async def test_emit_action_failure_does_not_break_the_step(tmp_path, monkeypatch
     assert actions[0].screenshot_path is None
 
 
-def test_element_box_matches_resolved_selector():
-    box = ExplorerAgent._element_box("#user-name", _SNAPSHOT_ELEMENTS)
-    assert box == {"x": 10, "y": 20, "width": 200, "height": 30}
+async def test_element_box_queries_the_live_page_locator():
+    # Not a snapshot lookup - it asks Playwright directly for whatever
+    # selector currently resolves to, so it works for any selector shape
+    # (text=, class, attribute), not just the bare #id/[name] case a
+    # hand-rolled snapshot match would catch.
+    fake_browser = _FakeBrowserWithScreenshot(boxes={"text=\"Dropdown\"": {"x": 5, "y": 6, "width": 7, "height": 8}})
+    agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM())
+    box = await agent._element_box('text="Dropdown"')
+    assert box == {"x": 5, "y": 6, "width": 7, "height": 8}
 
 
-def test_element_box_none_for_selectorless_action():
-    assert ExplorerAgent._element_box(None, _SNAPSHOT_ELEMENTS) is None
+async def test_element_box_none_for_selectorless_action():
+    agent = ExplorerAgent(browser=_FakeBrowserWithScreenshot(), llm=FakeLLM())
+    assert await agent._element_box(None) is None
+
+
+async def test_element_box_none_when_selector_matches_nothing():
+    agent = ExplorerAgent(browser=_FakeBrowserWithScreenshot(boxes={}), llm=FakeLLM())
+    assert await agent._element_box("#gone") is None
 
 
 async def test_execute_step_recovers_from_llm_error(explorer):
@@ -319,3 +383,95 @@ async def _fake_snapshot():
 
 async def _fake_action_success(action, selector, value):
     return True, None
+
+
+async def test_live_frame_loop_emits_periodic_untagged_frame_events(tmp_path, monkeypatch):
+    monkeypatch.setattr(explorer_module, "ACTION_SCREENSHOT_DIR", str(tmp_path))
+    monkeypatch.setattr(explorer_module, "LIVE_FRAME_INTERVAL_S", 0)
+
+    events: list[dict] = []
+
+    async def on_action(event: dict) -> None:
+        events.append(event)
+
+    agent = ExplorerAgent(browser=_FakeBrowserWithScreenshot(), llm=FakeLLM(), on_action=on_action)
+
+    task = asyncio.ensure_future(agent._live_frame_loop())
+    for _ in range(200):
+        if len(events) >= 3:
+            break
+        await asyncio.sleep(0)
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    assert len(events) >= 3
+    for event in events:
+        # A live tick is purely visual - it never carries the
+        # step/action/selector/target_box fields a discrete action event
+        # does, so it can't accidentally get treated as one downstream.
+        assert event["kind"] == "frame"
+        assert event["screenshot_url"].startswith("/screenshots/actions/")
+        assert "step" not in event
+        assert "target_box" not in event
+
+
+async def test_live_frame_loop_swallows_capture_failures(tmp_path, monkeypatch):
+    monkeypatch.setattr(explorer_module, "ACTION_SCREENSHOT_DIR", str(tmp_path))
+    monkeypatch.setattr(explorer_module, "LIVE_FRAME_INTERVAL_S", 0)
+
+    async def broken_on_action(event: dict) -> None:
+        raise RuntimeError("websocket send failed")
+
+    agent = ExplorerAgent(browser=_FakeBrowserWithScreenshot(), llm=FakeLLM(), on_action=broken_on_action)
+
+    task = asyncio.ensure_future(agent._live_frame_loop())
+    await asyncio.sleep(0)
+    await asyncio.sleep(0)
+    task.cancel()
+    # The whole point of the try/except inside the loop - a listener that
+    # raises must not blow up the background task or the exploration it
+    # runs alongside.
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+async def test_explore_runs_live_frame_loop_alongside_steps_and_cancels_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(explorer_module, "ACTION_SCREENSHOT_DIR", str(tmp_path))
+    monkeypatch.setattr(explorer_module, "LIVE_FRAME_INTERVAL_S", 0.01)
+    monkeypatch.setattr(
+        explorer_module,
+        "load_domains",
+        lambda: [Domain(name="fake_domain", base_url="http://x", workflows=[])],
+    )
+
+    events: list[dict] = []
+
+    async def on_action(event: dict) -> None:
+        events.append(event)
+
+    fake_browser = _FakeBrowserFull()
+    agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM(), on_action=on_action)
+
+    async def _slow_execute_step(step, actions):
+        await asyncio.sleep(0.05)
+
+    async def _noop_broken_input(step, actions):
+        return None
+
+    agent._execute_step = _slow_execute_step
+    agent._attempt_broken_input = _noop_broken_input
+
+    plan = TestPlan(ticket_id="T1", matched=True, domain="fake_domain", workflow="w", steps=["Do something"])
+
+    result = await agent.explore(plan)
+
+    assert result.completed is True
+    assert fake_browser.closed is True
+    frame_events = [e for e in events if e.get("kind") == "frame"]
+    # The interval is short and a step deliberately stalls for 50ms, giving
+    # the background loop room to tick at least once - proving it actually
+    # ran concurrently, not just that it was created and immediately
+    # cancelled without doing anything.
+    assert len(frame_events) >= 1
+    assert frame_events[0]["screenshot_url"].startswith("/screenshots/actions/")

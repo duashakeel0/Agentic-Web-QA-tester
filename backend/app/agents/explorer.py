@@ -12,6 +12,8 @@ if one action is slightly off, the loop guard and the step's action budget
 catch it well before it does real damage.
 """
 
+import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -42,6 +44,12 @@ _UNSAFE_FILENAME_CHARS = re.compile(r"[^a-zA-Z0-9_-]+")
 
 MAX_ACTIONS_PER_STEP = 6
 MAX_IDENTICAL_ACTION_REPEATS = 2
+# How often the background live-frame loop grabs a screenshot, independent
+# of the discrete per-action captures below. Discrete actions alone can be
+# seconds apart while the model "thinks" or a page loads, which reads as a
+# frozen still image rather than a live camera; this fills the gaps so the
+# live view keeps updating continuously like real video monitoring.
+LIVE_FRAME_INTERVAL_S = 0.75
 # Playwright's default actionability timeout is 30s - fine for a real,
 # slow-loading element, but ruinous for a hallucinated/invalid selector
 # (the loop guard already caps an exploration at MAX_ACTIONS_PER_STEP
@@ -109,6 +117,7 @@ class ExplorerAgent:
         self._llm = llm or ClaudeLLMClient()
         self._on_action = on_action
         self._action_index = 0
+        self._live_frame_index = 0
         self._run_key = "run"
 
     @property
@@ -131,12 +140,18 @@ class ExplorerAgent:
         broken_input_done = False
         completed_ok = False
         self._action_index = 0
+        self._live_frame_index = 0
         # Namespaces screenshot filenames so a concurrent "compare both" run
         # (same ticket/domain/workflow, two providers at once) never has one
         # provider's screenshots overwrite the other's.
         self._run_key = _safe_filename(f"{plan.ticket_id}_{plan.domain}_{plan.workflow}_{self._llm.provider}")
 
         await self._browser.start()
+        # Runs alongside the whole exploration below, only when someone's
+        # actually listening for live frames - a dashboard-less/report-only
+        # run (e.g. Trello-triggered) has no on_action, so there's no point
+        # burning screenshot IO for a live view nobody's watching.
+        frame_task = asyncio.create_task(self._live_frame_loop()) if self._on_action is not None else None
         try:
             # BrowserSession.goto(), not page.goto() directly - it already
             # waits on "domcontentloaded" instead of "load", which is what
@@ -174,6 +189,10 @@ class ExplorerAgent:
                 error=str(exc),
             )
         finally:
+            if frame_task is not None:
+                frame_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await frame_task
             if not (completed_ok and not close_browser):
                 await self._browser.close()
 
@@ -221,19 +240,23 @@ class ExplorerAgent:
                 return f'[name="{candidate}"]'
         return selector
 
-    @staticmethod
-    def _element_box(selector: str | None, elements: list[dict]) -> dict | None:
-        """The bounding box of whichever snapshot element a (possibly
-        already-resolved) selector points at - what a live view draws its
-        highlight box from. None for a selector-less action (navigate,
-        page-load) or one that doesn't match anything in the snapshot."""
+    async def _element_box(self, selector: str | None) -> dict | None:
+        """The live bounding box of whatever `selector` currently resolves
+        to on the real page, queried straight through Playwright rather
+        than cross-referenced against the snapshot list - works for every
+        selector shape the model can produce (#id, class, attribute,
+        Playwright's own text= engine, nested combinators), not just a
+        bare id/name lookup. None for a selector-less action or one that
+        matches nothing (already gone, hidden, or never existed)."""
         if not selector:
             return None
-        for element in elements:
-            el_id, el_name = element.get("id"), element.get("name")
-            if selector == (f"#{el_id}" if el_id else None) or selector == (f'[name="{el_name}"]' if el_name else None):
-                return element.get("rect")
-        return None
+        try:
+            box = await self._browser.page.locator(selector).first.bounding_box(timeout=1000)
+        except PlaywrightError:
+            return None
+        if box is None:
+            return None
+        return {"x": box["x"], "y": box["y"], "width": box["width"], "height": box["height"]}
 
     async def _emit_action(
         self,
@@ -244,7 +267,6 @@ class ExplorerAgent:
         value: str | None,
         success: bool,
         error: str | None,
-        elements: list[dict] | None = None,
     ) -> str | None:
         """Best-effort live-view/report material for one action: a
         screenshot saved to disk (served by main.py's /screenshots mount,
@@ -269,6 +291,7 @@ class ExplorerAgent:
             viewport = self._browser.page.viewport_size
             await self._on_action(
                 {
+                    "kind": "action",
                     "step": step,
                     "action": action,
                     "selector": selector,
@@ -276,7 +299,7 @@ class ExplorerAgent:
                     "success": success,
                     "error": error,
                     "screenshot_url": screenshot_url,
-                    "target_box": self._element_box(selector, elements or []),
+                    "target_box": await self._element_box(selector),
                     "viewport": viewport,
                 }
             )
@@ -284,6 +307,35 @@ class ExplorerAgent:
         except Exception:
             logger.exception("Failed to capture/emit a live action frame - continuing without it.")
             return None
+
+    async def _live_frame_loop(self) -> None:
+        """Continuously emits a screenshot at a fixed interval, independent
+        of the discrete per-action captures above - what gives the live
+        view a genuinely video-like, always-updating feed instead of one
+        that only jumps at each browser action (which can be seconds apart
+        while the model "thinks" or a page loads). Runs as a background
+        task alongside the step loop for the lifetime of one exploration
+        and is cancelled by explore() once it ends."""
+        while True:
+            await asyncio.sleep(LIVE_FRAME_INTERVAL_S)
+            try:
+                screenshot_bytes = await self._browser.page.screenshot()
+                self._live_frame_index += 1
+                filename = f"{self._run_key}_live_{self._live_frame_index:04d}.png"
+                os.makedirs(ACTION_SCREENSHOT_DIR, exist_ok=True)
+                with open(os.path.join(ACTION_SCREENSHOT_DIR, filename), "wb") as f:
+                    f.write(screenshot_bytes)
+                await self._on_action(
+                    {
+                        "kind": "frame",
+                        "screenshot_url": f"/screenshots/actions/{filename}",
+                        "viewport": self._browser.page.viewport_size,
+                    }
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("Live frame capture failed - continuing without it.", exc_info=True)
 
     async def _execute_action(self, action: str, selector: str | None, value: str | None) -> tuple[bool, str | None]:
         page = self._browser.page
@@ -386,7 +438,6 @@ class ExplorerAgent:
                 value=value,
                 success=success,
                 error=error,
-                elements=snapshot["elements"],
             )
             entry = ActionLogEntry(
                 step=step,
@@ -432,7 +483,6 @@ class ExplorerAgent:
             value=value,
             success=success,
             error=error,
-            elements=snapshot["elements"],
         )
         actions.append(
             ActionLogEntry(

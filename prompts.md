@@ -285,3 +285,28 @@ Running log of significant AI prompts used to build this project, per the intern
 - Every new assertion is a literal string read directly from CampusHub's source (toast text from the mutation hooks, heading/paragraph text from the page components) - not guessed or inferred, unlike the earlier ParaBank/Toolshop/AutomationExercise round which relied on web search.
 - `load_domains()` loads the updated YAML with no schema errors.
 - Full backend suite (163 tests) and frontend suite (18 tests) still pass - no code changes were needed outside the YAML itself.
+
+---
+
+## True live video feed + fixing missing red/green boxes
+
+**Context:** The live view only updated once per browser action, and actions can be seconds apart while the model "thinks" or a page loads - so it read as an occasionally-refreshing still image, not a live camera. Separately, the red/green highlight box was frequently just missing: `_element_box` matched a selector against the snapshot list by string equality against `#id`/`[name="..."]` only, so any action targeting an element without an id/name, or a selector built any other way (a class, an attribute, Playwright's own `text=` engine), silently got no box at all.
+
+**Prompt:** "also live testing is being done but its picture slike live screenshots, i want video monitoring like live camera showing also red bloakcs around errors are not there" - make the live view continuously update like real video, and fix the missing highlight boxes.
+
+**What was generated:**
+- `backend/app/agents/explorer.py`:
+  - `_element_box` rewritten from a static snapshot-rect lookup into an async instance method that asks Playwright directly - `page.locator(selector).first.bounding_box(timeout=1000)` - for whatever the selector currently resolves to on the live page. Works for any selector shape the model can produce, not just a bare id/name match, and returns `None` cleanly (via `PlaywrightError`) if the element is gone, hidden, or the selector never matched anything.
+  - New `_live_frame_loop()`: a background `asyncio` task that runs for the whole exploration, capturing and emitting a screenshot every `LIVE_FRAME_INTERVAL_S` (0.75s) independent of the model's action loop - the actual "video" - tagged `"kind": "frame"` so it's clearly not a discrete, report-worthy action. Started in `explore()` only when an `on_action` listener is actually attached (no point paying the screenshot IO for a live view nobody's watching), and cancelled in the existing `finally` block alongside the browser close.
+  - `_emit_action`'s events now carry `"kind": "action"` so the two event shapes stay distinguishable downstream.
+- `backend/app/agents/pipeline.py` - `on_action`'s wrapper now reads `event.pop("kind", "action")` and uses it as the WebSocket event's own `"type"`, so `"frame"` and `"action"` arrive as distinct event types on the wire with no new endpoint/plumbing needed.
+- `frontend/src/types/pipeline.ts` - new `"frame"` variant on the `PipelineEvent` union (`screenshot_url`/`viewport` only, no step/action/target_box - it's purely visual).
+- `frontend/src/hooks/usePipelineRun.ts` - a `"frame"` event swaps in the newer screenshot on the current `ActionFrame` (keeping whatever step/selector/box caption the last real action set) without ever touching `frameHistory`, so the filmstrip and the report/PDF's action log stay action-only.
+- `frontend/src/components/LiveBrowserView.tsx` + `.css` - a small pulsing "LIVE" badge in the header (only shown once a frame exists) to make the continuous-feed behavior visible, and a fallback caption ("Streaming the browser session…") for the moment before any real action has landed yet.
+
+**What was checked/modified before accepting:**
+- New Explorer unit tests: `_element_box` now queries a fake `page.locator(...).bounding_box()` and returns `None` for a selector matching nothing (not just a selector-less action); `_live_frame_loop` emits periodically-tagged `"frame"` events with no `step`/`target_box` fields and swallows a broken listener without dying; a full `explore()` run (fake browser, a step monkeypatched to stall for 50ms) proves the background loop actually ticks concurrently with real work and gets cleanly cancelled afterward, not just wired up syntactically.
+- New pipeline unit test: an Explorer that emits both `"kind": "frame"` and `"kind": "action"` events (plus one with no `"kind"` at all, to confirm the default) comes out the WebSocket as the right `"type"` for each.
+- New frontend test (`LiveBrowserView.test.tsx`): a successful action renders a green box, a failed one renders a red box with the error text, a frame with no `target_box` (the live-tick case) renders no box at all, and the LIVE badge only appears once a frame exists.
+- Full backend suite (168 tests, +5) and frontend suite (22 tests, +4) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** needs a real local run against a live site to confirm the 0.75s interval feels genuinely video-like without flooding the WebSocket/UI, and that Playwright's `bounding_box()` behaves the same against real, complex pages as it does against the fake locator in tests.

@@ -17,6 +17,40 @@
   color: var(--text-h);
 }
 
+.live-browser-live-dot {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--status-critical);
+}
+
+.live-browser-live-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-critical);
+  animation: live-dot-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes live-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .live-browser-live-pulse {
+    animation: none;
+  }
+}
+
 .live-browser-provider-tag {
   margin-left: auto;
   font-size: 10px;

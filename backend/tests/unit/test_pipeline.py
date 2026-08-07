@@ -145,6 +145,55 @@ async def test_run_pipeline_emits_events_in_order():
     ]
 
 
+async def test_run_pipeline_routes_action_events_by_kind(monkeypatch):
+    # The Explorer tags each on_action call "action" (discrete, goes in the
+    # report/filmstrip) or "frame" (a background live-view tick, purely
+    # visual) - the pipeline's wrapper must turn that into the WS event's
+    # own "type" so the two render differently on the dashboard, and must
+    # still default to "action" for a caller that omits "kind" altogether
+    # (older/other callers of the same callback shape).
+    class _ExplorerThatEmitsFrames:
+        def __init__(self, llm=None, on_action=None):
+            self.llm = llm
+            self.on_action = on_action
+            self.browser = _FakeBrowser()
+
+        async def explore(self, plan, close_browser=True):
+            await self.on_action({"kind": "frame", "screenshot_url": "/screenshots/actions/live.png", "viewport": None})
+            await self.on_action(
+                {
+                    "kind": "action",
+                    "step": "s",
+                    "action": "click",
+                    "selector": "#x",
+                    "value": None,
+                    "success": True,
+                    "error": None,
+                    "screenshot_url": "/screenshots/actions/a.png",
+                    "target_box": None,
+                    "viewport": None,
+                }
+            )
+            await self.on_action({"screenshot_url": "/screenshots/actions/no-kind.png", "viewport": None})
+            return ExplorationResult(
+                ticket_id=plan.ticket_id, domain=plan.domain, workflow=plan.workflow,
+                completed=True, actions=[], final_url="https://x/inventory.html", final_page_text="Products",
+            )
+
+    monkeypatch.setattr(pipeline, "ExplorerAgent", _ExplorerThatEmitsFrames)
+    events = []
+
+    async def on_event(event):
+        events.append(event)
+
+    await pipeline.run_pipeline("T1", "claude", on_event=on_event)
+
+    action_events = [e for e in events if "screenshot_url" in e]
+    assert [e["type"] for e in action_events] == ["frame", "action", "action"]
+    assert action_events[0]["screenshot_url"] == "/screenshots/actions/live.png"
+    assert "kind" not in action_events[0]
+
+
 async def test_run_pipeline_emits_stage_error_and_reraises(monkeypatch):
     class _BrokenExplorer:
         def __init__(self, llm=None, on_action=None):

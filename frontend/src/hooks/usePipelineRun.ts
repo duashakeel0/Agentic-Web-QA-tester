@@ -171,6 +171,30 @@ export function usePipelineRun() {
             const existing = prev[data.provider] ?? [];
             return { ...prev, [data.provider]: [...existing, frame].slice(-MAX_FRAME_HISTORY) };
           });
+        } else if (data.type === "frame") {
+          // A background live-view tick, not a discrete action - swaps in
+          // the newer screenshot so the picture keeps updating like a live
+          // camera between actions, but never touches the filmstrip/action
+          // history (that's action events only) and keeps whatever
+          // step/selector/box caption the last real action set.
+          setFrames((prev) => {
+            const existing = prev[data.provider];
+            const next: ActionFrame = existing
+              ? { ...existing, screenshotUrl: data.screenshot_url, viewport: data.viewport ?? existing.viewport, timestamp: Date.now() }
+              : {
+                  step: "",
+                  action: "live",
+                  selector: null,
+                  value: null,
+                  success: true,
+                  error: null,
+                  screenshotUrl: data.screenshot_url,
+                  targetBox: null,
+                  viewport: data.viewport,
+                  timestamp: Date.now(),
+                };
+            return { ...prev, [data.provider]: next };
+          });
         } else if (data.type === "pipeline_done") {
           setResults((prev) => ({ ...prev, [data.provider]: data.result }));
           setHistoryIds((prev) => ({ ...prev, [data.provider]: data.history_id }));

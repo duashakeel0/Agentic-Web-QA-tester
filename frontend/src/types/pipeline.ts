@@ -165,6 +165,16 @@ export type PipelineEvent =
       target_box: TargetBox | null;
       viewport: Viewport | null;
     }
+  | {
+      // A background live-view tick on a fixed interval, independent of
+      // any discrete browser action - purely visual, never logged to the
+      // action history/filmstrip/report.
+      type: "frame";
+      provider: Provider;
+      agent: AgentName;
+      screenshot_url: string | null;
+      viewport: Viewport | null;
+    }
   | { type: "pipeline_done"; provider: Provider; history_id: number; result: PipelineResult }
   | { type: "comparison_done"; comparison_group: string; comparison: ComparisonReport }
   | { type: "error"; provider?: Provider; message: string };

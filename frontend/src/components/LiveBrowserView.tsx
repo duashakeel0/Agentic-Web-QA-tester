@@ -43,6 +43,12 @@ function LiveBrowserView({
       <div className="live-browser-view-header">
         <Camera size={13} aria-hidden="true" />
         <span>Live Browser</span>
+        {frame && (
+          <span className="live-browser-live-dot" aria-label="Live">
+            <span className="live-browser-live-pulse" aria-hidden="true" />
+            LIVE
+          </span>
+        )}
         <span className={`live-browser-provider-tag live-browser-provider-${provider}`}>{PROVIDER_LABELS[provider]}</span>
       </div>
 
@@ -63,13 +69,17 @@ function LiveBrowserView({
             )}
             {overlay && <div className={`live-browser-box ${frame.success ? "box-pass" : "box-fail"}`} style={overlay} />}
           </div>
-          <p className={`live-browser-caption${frame.success ? "" : " live-browser-caption-fail"}`}>
-            <strong>{frame.step}</strong>
-            {" — "}
-            {frame.action}
-            {frame.selector ? ` on ${frame.selector}` : ""}
-            {!frame.success && frame.error ? ` — ${frame.error}` : ""}
-          </p>
+          {frame.step ? (
+            <p className={`live-browser-caption${frame.success ? "" : " live-browser-caption-fail"}`}>
+              <strong>{frame.step}</strong>
+              {" — "}
+              {frame.action}
+              {frame.selector ? ` on ${frame.selector}` : ""}
+              {!frame.success && frame.error ? ` — ${frame.error}` : ""}
+            </p>
+          ) : (
+            <p className="live-browser-caption">Streaming the browser session…</p>
+          )}
 
           {history.length > 1 && (
             <div className="live-browser-filmstrip" aria-label="Recent actions">
