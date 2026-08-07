@@ -5,6 +5,10 @@ from app.agents.llm_client import LLMError
 from app.agents.schema import ActionLogEntry, TestPlan
 from tests.helpers import FakeLLM
 
+_SNAPSHOT_ELEMENTS = [
+    {"tag": "input", "type": "text", "id": "user-name", "name": None, "placeholder": "Username", "text": ""},
+]
+
 
 class _FakeBrowser:
     """Just enough of BrowserSession's shape for tests that never actually
@@ -54,6 +58,55 @@ async def test_execute_step_raises_after_max_actions_without_done(explorer):
 
     with pytest.raises(ExplorerError, match="within .* actions"):
         await explorer._execute_step("Click something", [])
+
+
+async def test_execute_step_resolves_bare_id_selector(explorer):
+    # Ollama-style near-miss: echoes the element's bare id instead of a
+    # real CSS selector - should resolve to "#user-name", not fail/hang.
+    explorer._llm.queue('{"action": "fill", "selector": "user-name", "value": "bob", "reasoning": "fill it"}')
+    explorer._llm.queue('{"action": "done", "selector": null, "value": null, "reasoning": "done"}')
+
+    async def _snapshot_with_elements():
+        return {"url": "http://x", "title": "t", "elements": _SNAPSHOT_ELEMENTS}
+
+    explorer._snapshot = _snapshot_with_elements
+    explorer._execute_action = _fake_action_success
+
+    actions: list[ActionLogEntry] = []
+    await explorer._execute_step("Fill username", actions)
+
+    assert actions[0].selector == "#user-name"
+
+
+def test_resolve_selector_normalizes_bare_id():
+    resolved = ExplorerAgent._resolve_selector("user-name", _SNAPSHOT_ELEMENTS)
+    assert resolved == "#user-name"
+
+
+def test_resolve_selector_leaves_real_css_selector_alone():
+    resolved = ExplorerAgent._resolve_selector("#already-a-selector", _SNAPSHOT_ELEMENTS)
+    assert resolved == "#already-a-selector"
+
+
+def test_resolve_selector_leaves_unmatched_selector_alone():
+    resolved = ExplorerAgent._resolve_selector("nonexistent", _SNAPSHOT_ELEMENTS)
+    assert resolved == "nonexistent"
+
+
+async def test_execute_step_recovers_from_llm_error(explorer):
+    # A transient model failure (Ollama slow/unreachable) on one action
+    # should be recorded and retried, not crash the whole step.
+    explorer._llm.queue(LLMError("ollama unreachable"))
+    explorer._llm.queue('{"action": "done", "selector": null, "value": null, "reasoning": "done"}')
+    explorer._snapshot = _fake_snapshot
+    explorer._execute_action = _fake_action_success
+
+    actions: list[ActionLogEntry] = []
+    await explorer._execute_step("Fill username", actions)
+
+    assert len(actions) == 1
+    assert actions[0].success is False
+    assert "ollama unreachable" in actions[0].error
 
 
 async def test_broken_input_llmerror_is_logged_not_raised(explorer):

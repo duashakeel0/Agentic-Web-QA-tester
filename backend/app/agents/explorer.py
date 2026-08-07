@@ -39,6 +39,9 @@ NAVIGATE_TIMEOUT_MS = 15000
 DECISION_MAX_TOKENS = 200
 
 _NAVIGATION_ONLY_PREFIXES = ("navigate to", "wait for")
+# A selector starting with any of these is already a real CSS selector
+# (id/class/attribute/combinator) and left alone by _resolve_selector.
+_CSS_SELECTOR_PREFIX_CHARS = ("#", ".", "[", "*", ">", "~", "+", ":")
 
 _SNAPSHOT_JS = """
 () => Array.from(document.querySelectorAll(
@@ -132,6 +135,30 @@ class ExplorerAgent:
         elements = await page.evaluate(_SNAPSHOT_JS)
         return {"url": page.url, "title": await page.title(), "elements": elements}
 
+    @staticmethod
+    def _resolve_selector(selector: str | None, elements: list[dict]) -> str | None:
+        """A weaker model (Ollama's local Llama 3.1 especially) sometimes
+        echoes an element's bare id/name straight from the snapshot instead
+        of building a real CSS selector from it - "user-name" instead of
+        "#user-name" - which then fails or times out against a real page
+        even though the model clearly meant that exact element. Matched
+        against the same snapshot the model was shown, so a near-miss like
+        that still resolves to the right element instead of failing the
+        action outright.
+        """
+        if not selector:
+            return selector
+        candidate = selector.strip()
+        if not candidate or candidate.startswith(_CSS_SELECTOR_PREFIX_CHARS) or " " in candidate:
+            return selector
+        for element in elements:
+            if element.get("id") == candidate:
+                return f"#{candidate}"
+        for element in elements:
+            if element.get("name") == candidate:
+                return f'[name="{candidate}"]'
+        return selector
+
     async def _execute_action(self, action: str, selector: str | None, value: str | None) -> tuple[bool, str | None]:
         page = self._browser.page
         # A model call can succeed but still omit a field the action actually
@@ -168,15 +195,26 @@ class ExplorerAgent:
 
         for _ in range(MAX_ACTIONS_PER_STEP):
             snapshot = await self._snapshot()
-            decision, _ = await self._llm.complete_json(
-                self._step_prompt(step, snapshot, step_actions), max_tokens=DECISION_MAX_TOKENS
-            )
+            try:
+                decision, _ = await self._llm.complete_json(
+                    self._step_prompt(step, snapshot, step_actions), max_tokens=DECISION_MAX_TOKENS
+                )
+            except LLMError as exc:
+                # A transient model failure (Ollama slow/unreachable for one
+                # call, an unparseable response) shouldn't blow up the whole
+                # exploration - recorded as a failed "attempt" like any other
+                # so it counts against the step's action budget and the next
+                # loop iteration gets a fresh chance instead of crashing out.
+                entry = ActionLogEntry(step=step, action="unknown", success=False, error=str(exc))
+                actions.append(entry)
+                step_actions.append(entry)
+                continue
             action = decision.get("action", "unknown")
 
             if action == "done":
                 return
 
-            selector = decision.get("selector")
+            selector = self._resolve_selector(decision.get("selector"), snapshot["elements"])
             value = decision.get("value")
             signature = (action, selector, value)
             seen_signatures[signature] = seen_signatures.get(signature, 0) + 1
@@ -220,7 +258,7 @@ class ExplorerAgent:
             return
 
         action = decision.get("action", "unknown")
-        selector = decision.get("selector")
+        selector = self._resolve_selector(decision.get("selector"), snapshot["elements"])
         value = decision.get("value")
         success, error = await self._execute_action(action, selector, value)
         actions.append(
@@ -274,9 +312,11 @@ Interactive elements on the page (tag, type, id, name, placeholder, visible text
 {json.dumps(snapshot["elements"], indent=2)}
 
 Decide the single next browser action needed to make progress on this step,
-using the real element info above to build the selector. Respond with ONLY a
-JSON object, no other text, in exactly this shape:
-{{"action": "fill"|"click"|"select"|"press"|"navigate"|"done", "selector": "<CSS selector, or null for navigate/done>", "value": "<text/URL/option value, or null>", "reasoning": "<one short sentence>"}}
+using the real element info above to build the selector. The selector must
+be a real CSS selector, not a bare id/name string - if an element's "id" is
+"user-name", the selector is "#user-name", NOT "user-name". Respond with
+ONLY a JSON object, no other text, in exactly this shape:
+{{"action": "fill"|"click"|"select"|"press"|"navigate"|"done", "selector": "<CSS selector, e.g. '#user-name', or null for navigate/done>", "value": "<text/URL/option value, or null>", "reasoning": "<one short sentence>"}}
 
 Use "done" only once the current page already satisfies this step.
 """
@@ -299,6 +339,8 @@ Interactive elements on the page (tag, type, id, name, placeholder, visible text
 {json.dumps(snapshot["elements"], indent=2)}
 
 Decide ONE browser action that deliberately uses broken input for this step.
+The selector must be a real CSS selector, not a bare id/name string - if an
+element's "id" is "user-name", the selector is "#user-name", NOT "user-name".
 Respond with ONLY a JSON object, no other text, in exactly this shape:
-{{"action": "fill"|"click"|"select"|"press", "selector": "<selector>", "value": "<deliberately invalid/empty value, or null>", "reasoning": "<what makes this input broken and what you expect to happen>"}}
+{{"action": "fill"|"click"|"select"|"press", "selector": "<CSS selector, e.g. '#user-name'>", "value": "<deliberately invalid/empty value, or null>", "reasoning": "<what makes this input broken and what you expect to happen>"}}
 """
