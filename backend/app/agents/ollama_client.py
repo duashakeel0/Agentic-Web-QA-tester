@@ -18,7 +18,7 @@ DEFAULT_MODEL = "llama3.1"
 # after that runs on the model but still has no hard upper bound on a slow
 # machine - too short a timeout here reads as "Ollama isn't running" when
 # it's actually just still thinking.
-REQUEST_TIMEOUT_SECONDS = 180.0
+REQUEST_TIMEOUT_SECONDS = 600.0
 
 
 class OllamaLLMClient(LLMClient):

@@ -6,7 +6,7 @@ import ModelSelector from "../components/ModelSelector";
 import PipelineTimeline from "../components/PipelineTimeline";
 import ReportCard from "../components/ReportCard";
 import TalkingAgentsPanel from "../components/TalkingAgentsPanel";
-import { usePipelineRun } from "../hooks/usePipelineRun";
+import { usePipelineRunContext } from "../contexts/PipelineRunContext";
 import type { ModelChoice, Provider } from "../types/pipeline";
 import "./RunTest.css";
 
@@ -17,7 +17,8 @@ const PROVIDER_ORDER: Provider[] = ["claude", "ollama"];
 function RunTest() {
   const [ticketId, setTicketId] = useState("");
   const [model, setModel] = useState<ModelChoice>("claude");
-  const { status, feed, stages, frames, frameHistory, results, comparison, errorMessage, start, reset } = usePipelineRun();
+  const { status, feed, stages, frames, frameHistory, results, comparison, errorMessage, start, reset } =
+    usePipelineRunContext();
 
   const running = status === "connecting" || status === "running";
   const resultList = PROVIDER_ORDER.map((p) => results[p]).filter((r) => r !== undefined);

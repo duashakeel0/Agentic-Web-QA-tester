@@ -310,3 +310,22 @@ Running log of significant AI prompts used to build this project, per the intern
 - New frontend test (`LiveBrowserView.test.tsx`): a successful action renders a green box, a failed one renders a red box with the error text, a frame with no `target_box` (the live-tick case) renders no box at all, and the LIVE badge only appears once a frame exists.
 - Full backend suite (168 tests, +5) and frontend suite (22 tests, +4) pass; `tsc --noEmit` and `oxlint` clean.
 - **Not yet completed:** needs a real local run against a live site to confirm the 0.75s interval feels genuinely video-like without flooding the WebSocket/UI, and that Playwright's `bounding_box()` behaves the same against real, complex pages as it does against the fake locator in tests.
+
+---
+
+## Longer Ollama timeout + live run surviving navigation
+
+**Context:** Two more real usability bugs. First, Ollama's 180s request timeout was tripping on genuinely slow local hardware mid-run, not just on the "model still loading" case it was sized for. Second, and more disruptive: `Dashboard.tsx` and `RunTest.tsx` each called `usePipelineRun()` themselves, so the WebSocket connection and all live run state (stages, feed, live frames, results) lived inside whichever page component started the run. Navigating to History/Compare/Analytics mid-run unmounted that page, which tore down the socket and threw away every bit of live state - coming back showed a blank dashboard as if no test had ever run, even though the backend run itself was likely still going.
+
+**Prompt:** "upgrade llama timeout so it doesnt timeout, make it 10 minutes maybe" / "when i run a test, and go to any other nav... test got vanishes... fix it in a way, if i might change nav, test still keep running."
+
+**What was generated:**
+- `backend/app/agents/ollama_client.py` - `REQUEST_TIMEOUT_SECONDS` raised from 180 to 600 (10 minutes).
+- `frontend/src/contexts/PipelineRunContext.tsx` (new) - a `PipelineRunProvider` that calls `usePipelineRun()` exactly once and shares it via context, plus a `usePipelineRunContext()` hook (same throws-outside-provider pattern as `AuthContext`).
+- `frontend/src/App.tsx` - `PipelineRunProvider` now wraps `<BrowserRouter>` itself (inside `AuthProvider`, above every `<Route>`), so it's never part of the tree that unmounts on navigation - only the routed page underneath it swaps.
+- `frontend/src/pages/Dashboard.tsx` and `RunTest.tsx` - both switched from `usePipelineRun()` to `usePipelineRunContext()`, so they now read and drive the exact same live run instead of each tracking an independent one (a pre-existing but separate inconsistency - starting a run from one page never used to show up on the other either).
+
+**What was checked/modified before accepting:**
+- New `PipelineRunContext.test.tsx`: a consumer used outside the provider throws the expected error; two consumer trees mounted in sequence under the same still-alive provider (simulating navigating to a different page mid-run, via a `rerender` that swaps children under the identical provider instance) see the exact same live `status`, and only one `WebSocket` ever got opened - proving the connection is genuinely shared and survives what would previously have been a remount, not just that the code compiles.
+- Full backend suite (168 tests) and frontend suite (24 tests, +2) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** same as before - no real Ollama instance or live browser session in this sandbox to confirm a genuinely slow local run now survives past 180s, or that navigating away and back mid-run behaves as expected against the real WebSocket (only a faithful fake was exercised in tests).

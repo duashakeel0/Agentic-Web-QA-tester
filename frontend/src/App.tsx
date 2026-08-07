@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { AuthProvider } from "./contexts/AuthContext";
+import { PipelineRunProvider } from "./contexts/PipelineRunContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import DashboardLayout from "./layouts/DashboardLayout";
 import Analytics from "./pages/Analytics";
@@ -23,67 +24,69 @@ function ProtectedDashboard({ children }: { children: ReactNode }) {
 function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            path="/"
-            element={
-              <ProtectedDashboard>
-                <Dashboard />
-              </ProtectedDashboard>
-            }
-          />
-          <Route
-            path="/run"
-            element={
-              <ProtectedDashboard>
-                <RunTest />
-              </ProtectedDashboard>
-            }
-          />
-          <Route
-            path="/history"
-            element={
-              <ProtectedDashboard>
-                <History />
-              </ProtectedDashboard>
-            }
-          />
-          <Route
-            path="/history/:id"
-            element={
-              <ProtectedDashboard>
-                <HistoryReport />
-              </ProtectedDashboard>
-            }
-          />
-          <Route
-            path="/compare"
-            element={
-              <ProtectedDashboard>
-                <Compare />
-              </ProtectedDashboard>
-            }
-          />
-          <Route
-            path="/analytics"
-            element={
-              <ProtectedDashboard>
-                <Analytics />
-              </ProtectedDashboard>
-            }
-          />
-          <Route
-            path="/domain-knowledge"
-            element={
-              <ProtectedDashboard>
-                <DomainKnowledge />
-              </ProtectedDashboard>
-            }
-          />
-        </Routes>
-      </BrowserRouter>
+      <PipelineRunProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedDashboard>
+                  <Dashboard />
+                </ProtectedDashboard>
+              }
+            />
+            <Route
+              path="/run"
+              element={
+                <ProtectedDashboard>
+                  <RunTest />
+                </ProtectedDashboard>
+              }
+            />
+            <Route
+              path="/history"
+              element={
+                <ProtectedDashboard>
+                  <History />
+                </ProtectedDashboard>
+              }
+            />
+            <Route
+              path="/history/:id"
+              element={
+                <ProtectedDashboard>
+                  <HistoryReport />
+                </ProtectedDashboard>
+              }
+            />
+            <Route
+              path="/compare"
+              element={
+                <ProtectedDashboard>
+                  <Compare />
+                </ProtectedDashboard>
+              }
+            />
+            <Route
+              path="/analytics"
+              element={
+                <ProtectedDashboard>
+                  <Analytics />
+                </ProtectedDashboard>
+              }
+            />
+            <Route
+              path="/domain-knowledge"
+              element={
+                <ProtectedDashboard>
+                  <DomainKnowledge />
+                </ProtectedDashboard>
+              }
+            />
+          </Routes>
+        </BrowserRouter>
+      </PipelineRunProvider>
     </AuthProvider>
   );
 }

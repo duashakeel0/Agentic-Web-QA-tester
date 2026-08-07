@@ -23,7 +23,8 @@ import PipelineTimeline from "../components/PipelineTimeline";
 import ReportCard from "../components/ReportCard";
 import TalkingAgentsPanel from "../components/TalkingAgentsPanel";
 import { useAuth } from "../contexts/AuthContext";
-import { usePipelineRun, type RunStatus } from "../hooks/usePipelineRun";
+import { usePipelineRunContext } from "../contexts/PipelineRunContext";
+import type { RunStatus } from "../hooks/usePipelineRun";
 import { apiGet, ApiError } from "../services/api";
 import type { DailyStat, HistoryEntry, HistoryStats, ProviderStats } from "../types/history";
 import type { ModelChoice, Provider } from "../types/pipeline";
@@ -95,7 +96,7 @@ function Dashboard() {
   const [ticketId, setTicketId] = useState("");
   const [model, setModel] = useState<ModelChoice>("claude");
   const { status, feed, stages, frames, frameHistory, results, historyIds, comparison, errorMessage, start, reset } =
-    usePipelineRun();
+    usePipelineRunContext();
   const { toasts, dismiss } = useRunToasts(status, errorMessage, ticketId);
 
   const [stats, setStats] = useState<HistoryStats | null>(null);
