@@ -26,7 +26,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { usePipelineRunContext } from "../contexts/PipelineRunContext";
 import type { RunStatus } from "../hooks/usePipelineRun";
 import { apiGet, ApiError } from "../services/api";
-import type { DailyStat, HistoryEntry, HistoryStats, ProviderStats } from "../types/history";
+import type { DailyStat, HistoryEntry, HistoryStats, ProviderStats, SiteStats } from "../types/history";
 import type { ModelChoice, Provider } from "../types/pipeline";
 import "./Dashboard.css";
 
@@ -103,6 +103,7 @@ function Dashboard() {
   const [daily, setDaily] = useState<DailyStat[]>([]);
   const [providerStats, setProviderStats] = useState<ProviderStats[]>([]);
   const [recentRuns, setRecentRuns] = useState<HistoryEntry[]>([]);
+  const [siteStats, setSiteStats] = useState<SiteStats[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const running = status === "connecting" || status === "running";
@@ -116,12 +117,14 @@ function Dashboard() {
       apiGet<DailyStat[]>("/api/history/daily?days=7"),
       apiGet<ProviderStats[]>("/api/history/provider-stats"),
       apiGet<HistoryEntry[]>("/api/history?limit=6"),
+      apiGet<SiteStats[]>("/api/history/site-stats"),
     ])
-      .then(([s, d, p, r]) => {
+      .then(([s, d, p, r, sites]) => {
         setStats(s);
         setDaily(d);
         setProviderStats(p);
         setRecentRuns(r);
+        setSiteStats(sites);
         setLoadError(null);
       })
       .catch((err) => {
@@ -433,6 +436,30 @@ function Dashboard() {
                     <span className="dash-history-time">{formatDate(run.created_at)}</span>
                   </div>
                 </Link>
+              ))}
+            </div>
+          </section>
+
+          <section className="dash-panel">
+            <div className="dash-panel-heading">
+              <h2>Sites Tested</h2>
+            </div>
+            <div className="dash-site-stats-list">
+              {siteStats.length === 0 && <p className="dash-empty">No sites tested yet.</p>}
+              {siteStats.map((site) => (
+                <div className="dash-site-stats-row" key={site.domain}>
+                  <div>
+                    <div className="dash-site-stats-name">{site.domain}</div>
+                    <div className="dash-site-stats-meta">Last tested {formatDate(site.last_tested_at)}</div>
+                  </div>
+                  <div className="dash-site-stats-right">
+                    <span className="dash-site-stats-count">{site.run_count}×</span>
+                    <span className="dash-site-stats-split">
+                      <span className="dash-site-stats-pass">{site.passed} pass</span>
+                      {site.failed > 0 && <span className="dash-site-stats-fail"> · {site.failed} fail</span>}
+                    </span>
+                  </div>
+                </div>
               ))}
             </div>
           </section>

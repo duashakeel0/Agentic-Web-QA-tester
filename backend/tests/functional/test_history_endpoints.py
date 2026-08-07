@@ -1,12 +1,12 @@
 from app.agents.schema import PipelineResult, RunMetrics, TestPlan, VerifierResult
 
 
-def _result(ticket_id, provider, verdict, cost=0.01):
+def _result(ticket_id, provider, verdict, cost=0.01, domain="practice_software_testing"):
     return PipelineResult(
         ticket_id=ticket_id, provider=provider,
-        plan=TestPlan(ticket_id=ticket_id, matched=True, domain="practice_software_testing", workflow="login", steps=["a"]),
+        plan=TestPlan(ticket_id=ticket_id, matched=True, domain=domain, workflow="login", steps=["a"]),
         verification=VerifierResult(
-            ticket_id=ticket_id, domain="practice_software_testing", workflow="login", verdict=verdict,
+            ticket_id=ticket_id, domain=domain, workflow="login", verdict=verdict,
             assertion_checked={}, initial_check_passed=(verdict == "pass"), retried=False,
         ),
         metrics=RunMetrics(
@@ -84,6 +84,19 @@ async def test_daily_endpoint(client, auth_headers, app_history):
     assert response.json()[0]["total"] == 1
 
 
+async def test_site_stats_endpoint(client, auth_headers, app_history):
+    await app_history.record_run(_result("T1", "claude", "pass", domain="practice_software_testing"))
+    await app_history.record_run(_result("T2", "ollama", "fail", domain="practice_software_testing"))
+    await app_history.record_run(_result("T3", "claude", "pass", domain="parabank"))
+
+    response = client.get("/api/history/site-stats", headers=auth_headers)
+
+    assert response.status_code == 200
+    by_domain = {s["domain"]: s for s in response.json()}
+    assert by_domain["practice_software_testing"]["run_count"] == 2
+    assert by_domain["parabank"]["run_count"] == 1
+
+
 async def test_comparison_endpoint(client, auth_headers, app_history):
     group = app_history.new_comparison_group()
     await app_history.record_run(_result("T1", "claude", "pass"), group)
@@ -109,6 +122,7 @@ def test_history_routes_require_auth(client):
     assert client.get("/api/history/stats").status_code == 401
     assert client.get("/api/history/provider-stats").status_code == 401
     assert client.get("/api/history/daily").status_code == 401
+    assert client.get("/api/history/site-stats").status_code == 401
     assert client.get("/api/history/1").status_code == 401
 
 

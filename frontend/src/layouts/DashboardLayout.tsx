@@ -15,7 +15,6 @@ import {
   ShieldCheck,
   Sun,
 } from "lucide-react";
-import GlobalChat from "../components/GlobalChat";
 import { useAuth } from "../contexts/AuthContext";
 import { useAppTheme } from "../hooks/useAppTheme";
 import "./DashboardLayout.css";
@@ -165,8 +164,6 @@ function DashboardLayout({ children }: { children: ReactNode }) {
         </header>
         <main className="dashboard-content">{children}</main>
       </div>
-
-      <GlobalChat />
     </div>
   );
 }

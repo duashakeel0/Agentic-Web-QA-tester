@@ -52,6 +52,83 @@ def test_chat_returns_502_when_llm_call_fails(client, auth_headers, monkeypatch)
     assert response.status_code == 502
 
 
+def test_chat_starts_a_run_when_the_model_detects_that_intent(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "ClaudeLLMClient",
+        lambda: _FakeLLMClient(
+            text='{"intent": "run_ticket", "ticket_id": "ABC123", "model": "claude", '
+            '"reply": "Starting a Claude run for ticket ABC123 now."}'
+        ),
+    )
+
+    response = client.post("/api/chat", json={"message": "run ticket ABC123", "history": []}, headers=auth_headers)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["action"] == "run_ticket"
+    assert body["ticket_id"] == "ABC123"
+    assert body["model"] == "claude"
+    assert body["reply"] == "Starting a Claude run for ticket ABC123 now."
+
+
+def test_chat_defaults_to_claude_when_model_missing_or_invalid(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "ClaudeLLMClient",
+        lambda: _FakeLLMClient(text='{"intent": "run_ticket", "ticket_id": "T1", "reply": "Starting now."}'),
+    )
+
+    response = client.post("/api/chat", json={"message": "run T1"}, headers=auth_headers)
+
+    assert response.json()["model"] == "claude"
+
+
+def test_chat_ignores_run_ticket_intent_with_no_ticket_id(client, auth_headers, monkeypatch):
+    # A malformed/incomplete run_ticket response (no ticket_id) should
+    # never be treated as an action - falls back to a plain chat reply
+    # instead of trying to start a run with nothing to run.
+    monkeypatch.setattr(
+        main_module,
+        "ClaudeLLMClient",
+        lambda: _FakeLLMClient(text='{"intent": "run_ticket", "reply": "Which ticket should I run?"}'),
+    )
+
+    response = client.post("/api/chat", json={"message": "run something"}, headers=auth_headers)
+
+    body = response.json()
+    assert body["action"] is None
+    assert body["reply"] == "Which ticket should I run?"
+
+
+def test_chat_json_reply_shown_directly_for_plain_chat_intent(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "ClaudeLLMClient",
+        lambda: _FakeLLMClient(text='{"intent": "chat", "reply": "The Explorer uses Playwright."}'),
+    )
+
+    response = client.post("/api/chat", json={"message": "how does the explorer work?"}, headers=auth_headers)
+
+    body = response.json()
+    assert body["action"] is None
+    assert body["reply"] == "The Explorer uses Playwright."
+
+
+def test_chat_prompt_is_grounded_in_real_registered_domains(client, auth_headers, monkeypatch):
+    captured_client = _FakeLLMClient(text='{"intent": "chat", "reply": "ok"}')
+    captured_client.complete = AsyncMock(wraps=captured_client.complete)
+    monkeypatch.setattr(main_module, "ClaudeLLMClient", lambda: captured_client)
+
+    client.post("/api/chat", json={"message": "what sites can you test?"}, headers=auth_headers)
+
+    prompt = captured_client.complete.call_args.args[0]
+    # Real registered domain names, not a generic/hallucinated list -
+    # confirms the prompt is actually grounded in load_domains().
+    assert "practice_software_testing" in prompt
+    assert "parabank" in prompt
+
+
 def test_chat_includes_conversation_history_in_prompt(client, auth_headers, monkeypatch):
     captured_client = _FakeLLMClient(text="ok")
     captured_client.complete = AsyncMock(wraps=captured_client.complete)

@@ -64,3 +64,11 @@ export interface DailyStat {
   total_cost_usd: number;
   avg_duration_ms: number;
 }
+
+export interface SiteStats {
+  domain: string;
+  run_count: number;
+  passed: number;
+  failed: number;
+  last_tested_at: number;
+}

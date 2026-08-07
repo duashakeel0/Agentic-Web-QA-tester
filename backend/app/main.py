@@ -34,7 +34,15 @@ from app.auth import AuthError, login as auth_login, logout as auth_logout, requ
 from app.browser import BrowserSession
 from app.domains.manifest import load_domains, save_workflow, slugify
 from app.domains.schema import Domain, ExpectedOutcome, Workflow
-from app.history.schema import ComparisonHistoryEntry, DailyStat, HistoryDetail, HistoryEntry, HistoryStats, ProviderStats
+from app.history.schema import (
+    ComparisonHistoryEntry,
+    DailyStat,
+    HistoryDetail,
+    HistoryEntry,
+    HistoryStats,
+    ProviderStats,
+    SiteStats,
+)
 from app.history.store import HistoryStore
 from app.pdf_report import generate_report_pdf
 
@@ -280,6 +288,13 @@ async def daily_stats(days: int = 7, _token: str = Depends(require_auth)) -> lis
     return await history.daily_stats(days=days)
 
 
+@app.get("/api/history/site-stats", response_model=list[SiteStats])
+async def site_stats(_token: str = Depends(require_auth)) -> list[SiteStats]:
+    """How many times each registered website has actually been tested -
+    the sidebar's "tested N times" summary."""
+    return await history.site_stats()
+
+
 @app.get("/api/history/{run_id}", response_model=HistoryDetail)
 async def get_history_entry(run_id: int, _token: str = Depends(require_auth)) -> HistoryDetail:
     entry = await history.get_run(run_id)
@@ -417,32 +432,100 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+    # Set only when the assistant detected a clear "run/test this ticket"
+    # request - the frontend uses these to actually start the run through
+    # the same WebSocket pipeline a manual "New Test" submit would, rather
+    # than the chat pretending to run something it can't.
+    action: str | None = None  # "run_ticket" | None
+    ticket_id: str | None = None
+    model: str | None = None  # "claude" | "ollama" | "both"
+
+
+_CHAT_VALID_MODELS = {"claude", "ollama", "both"}
+
+
+def _system_facts_for_chat() -> str:
+    """Real, current facts about this exact system - grounds the
+    assistant's answers about "how does this work" in what's actually
+    true right now (registered domains especially, which change over
+    time) instead of generic AI filler about QA tools in general."""
+    domains = load_domains()
+    domain_lines = "\n".join(f"- {d.name} ({d.base_url}): {', '.join(w.name for w in d.workflows)}" for d in domains)
+    return f"""SentinelQA is a four-agent AI QA testing pipeline:
+- Planner: reads a Trello ticket, matches it against the registered domain/workflow manifest below, builds a test plan.
+- Explorer: drives a real Playwright browser, deciding each next action from the live page state (not a fixed script).
+- Verifier: re-checks a flagged result once before it's accepted as confirmed.
+- Reporter: writes the final report and posts a summary comment back to the originating Trello ticket.
+
+Two LLM providers, split by cost/call-volume: Claude (Anthropic) drives the Planner, Verifier, and
+Reporter's judgment-heavy, low-call-volume work; Llama (via local Ollama or Groq's hosted API) drives
+the Explorer's frequent, low-stakes per-action decisions. The user can run a ticket on Claude, Llama, or
+both side by side (a "Compare Mode" that shows a head-to-head on accuracy, coverage, latency, and cost).
+
+Backend: FastAPI (Python) + SQLite for run history. Frontend: React + TypeScript + Vite. Browser
+automation: Playwright. A WebSocket streams each agent's live status, screenshots, and the final report.
+
+Currently registered domains and workflows (this is the complete, real, current list - nothing else can
+be tested until it's added via the Domain Knowledge page):
+{domain_lines or "(none registered yet)"}
+"""
 
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, _token: str = Depends(require_auth)) -> ChatResponse:
     """A general-purpose assistant, unlike /ask which only answers from one
     run's report - this one can talk about anything, the same way any
-    Claude chat would. Stateless on the backend; the client resends the
-    running conversation each turn."""
+    Claude chat would, AND can start a ticket run when asked in plain
+    language. Stateless on the backend; the client resends the running
+    conversation each turn."""
     try:
         llm = ClaudeLLMClient()
     except LLMError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     transcript = "\n".join(f"{m.role.capitalize()}: {m.content}" for m in body.history[-CHAT_HISTORY_LIMIT:])
-    prompt = f"""You are the assistant built into SentinelQA, an AI-powered QA testing dashboard.
-You can help with anything the user asks, not only QA/testing topics - answer like a
-general-purpose, knowledgeable assistant would.
+    prompt = f"""You are the assistant built into SentinelQA, an AI-powered QA testing dashboard. You can
+help with anything the user asks, not only QA/testing topics, AND you can answer accurately about how
+this exact system works using the real facts below - never invent architecture details not listed here.
+
+{_system_facts_for_chat()}
+
+You can also START a real test run when the user clearly asks to run/test a ticket in plain language
+(e.g. "run ticket ABC123", "test the toolshop login on both models"), as long as they give or clearly
+imply a ticket ID.
 
 {transcript}
 User: {body.message}
 
-Respond directly and conversationally, no preamble like "Sure!" or "Here's the answer:".
+Respond with ONLY a JSON object, no other text, no markdown fences, in exactly one of these two shapes:
+1. Just answering: {{"intent": "chat", "reply": "<conversational answer, no preamble like 'Sure!'>"}}
+2. Starting a run (only when a ticket ID is given or clearly implied): {{"intent": "run_ticket",
+   "ticket_id": "<the ticket id>", "model": "claude"|"ollama"|"both"|null,
+   "reply": "<short confirmation, e.g. 'Starting a Claude run for ticket ABC123 now.'>"}}
+If they ask to run something but give no identifiable ticket ID, use "chat" and ask for it instead.
 """
     try:
-        response = await llm.complete(prompt, max_tokens=600, timeout=25)
+        response = await llm.complete(prompt, max_tokens=400, timeout=25)
     except LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    return ChatResponse(reply=response.text)
+    text = response.text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        # Answered in plain prose instead of the requested JSON shape -
+        # still a perfectly good chat answer, shown directly rather than
+        # failing the whole request over a formatting near-miss.
+        return ChatResponse(reply=response.text.strip())
+
+    if parsed.get("intent") == "run_ticket" and parsed.get("ticket_id"):
+        model = parsed.get("model") if parsed.get("model") in _CHAT_VALID_MODELS else "claude"
+        ticket_id = str(parsed["ticket_id"])
+        return ChatResponse(
+            reply=str(parsed.get("reply") or f"Starting a {model} run for ticket {ticket_id} now."),
+            action="run_ticket",
+            ticket_id=ticket_id,
+            model=model,
+        )
+
+    return ChatResponse(reply=str(parsed.get("reply") or response.text.strip()))

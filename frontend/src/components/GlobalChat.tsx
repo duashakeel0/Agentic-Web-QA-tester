@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
 import { MessageCircle, Send, X } from "lucide-react";
+import { usePipelineRunContext } from "../contexts/PipelineRunContext";
 import { apiPost, ApiError } from "../services/api";
+import type { ModelChoice } from "../types/pipeline";
 import "./GlobalChat.css";
 
 interface ChatMessage {
@@ -8,10 +11,21 @@ interface ChatMessage {
   content: string;
 }
 
+interface ChatApiResponse {
+  reply: string;
+  action: "run_ticket" | null;
+  ticket_id: string | null;
+  model: ModelChoice | null;
+}
+
 /** A general-purpose assistant, reachable from every page in the dashboard -
  * unlike AskAboutTest, this isn't grounded in any one report; it answers
- * whatever it's asked. */
+ * whatever it's asked, AND can start a real ticket run when told to in
+ * plain language ("run ticket ABC123") by driving the same shared pipeline
+ * run a manual "New Test" submit would. */
 function GlobalChat() {
+  const navigate = useNavigate();
+  const { start } = usePipelineRunContext();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -31,11 +45,15 @@ function GlobalChat() {
     setSending(true);
     setError(null);
     try {
-      const response = await apiPost<{ reply: string }>("/api/chat", {
+      const response = await apiPost<ChatApiResponse>("/api/chat", {
         message: text,
         history: messages,
       });
       setMessages([...nextMessages, { role: "assistant", content: response.reply }]);
+      if (response.action === "run_ticket" && response.ticket_id) {
+        start(response.ticket_id, response.model ?? "claude");
+        navigate("/");
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not reach the assistant right now.");
     } finally {
@@ -64,12 +82,16 @@ function GlobalChat() {
         <div className="global-chat-panel">
           <div className="global-chat-header">
             <span>Ask anything</span>
-            <span className="global-chat-subtitle">Not limited to test reports - ask about anything.</span>
+            <span className="global-chat-subtitle">
+              Ask about anything, or say "run ticket ABC123" to start a test.
+            </span>
           </div>
 
           <div className="global-chat-messages">
             {messages.length === 0 && (
-              <p className="global-chat-empty">Ask about a new workflow idea, how something works, or anything else.</p>
+              <p className="global-chat-empty">
+                Ask how SentinelQA works, a new workflow idea, or say "run ticket ABC123" to start a test.
+              </p>
             )}
             {messages.map((m, i) => (
               <div className={`global-chat-message global-chat-${m.role}`} key={i}>

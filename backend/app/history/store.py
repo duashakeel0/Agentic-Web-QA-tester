@@ -26,6 +26,7 @@ from app.history.schema import (
     HistoryStats,
     MissedStepCount,
     ProviderStats,
+    SiteStats,
 )
 
 DEFAULT_DB_PATH = "data/history.db"
@@ -315,6 +316,34 @@ class HistoryStore:
 
     async def daily_stats(self, days: int = 7) -> list[DailyStat]:
         return await asyncio.to_thread(self._daily_stats_sync, days)
+
+    def _site_stats_sync(self) -> list[SiteStats]:
+        with self._connect() as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """SELECT domain,
+                    COUNT(*) AS run_count,
+                    SUM(CASE WHEN verdict IN ('pass', 'pass_with_issues') THEN 1 ELSE 0 END) AS passed,
+                    SUM(CASE WHEN verdict = 'fail' THEN 1 ELSE 0 END) AS failed,
+                    MAX(created_at) AS last_tested_at
+                FROM runs
+                WHERE domain IS NOT NULL
+                GROUP BY domain
+                ORDER BY run_count DESC"""
+            ).fetchall()
+        return [
+            SiteStats(
+                domain=row["domain"],
+                run_count=row["run_count"],
+                passed=row["passed"],
+                failed=row["failed"],
+                last_tested_at=row["last_tested_at"],
+            )
+            for row in rows
+        ]
+
+    async def site_stats(self) -> list[SiteStats]:
+        return await asyncio.to_thread(self._site_stats_sync)
 
 
 def _row_to_entry(row: sqlite3.Row) -> HistoryEntry:

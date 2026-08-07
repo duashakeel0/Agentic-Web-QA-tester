@@ -73,3 +73,15 @@ class DailyStat(BaseModel):
     failed: int
     total_cost_usd: float
     avg_duration_ms: float
+
+
+class SiteStats(BaseModel):
+    """How many times each registered website has actually been tested -
+    the sidebar's "tested N times" summary, distinct from ProviderStats
+    (grouped by model) or HistoryStats (one grand total across everything)."""
+
+    domain: str
+    run_count: int
+    passed: int
+    failed: int
+    last_tested_at: float
