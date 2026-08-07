@@ -59,6 +59,13 @@ _NAVIGATION_ONLY_PREFIXES = ("navigate to", "wait for")
 # A selector starting with any of these is already a real CSS selector
 # (id/class/attribute/combinator) and left alone by _resolve_selector.
 _CSS_SELECTOR_PREFIX_CHARS = ("#", ".", "[", "*", ">", "~", "+", ":")
+# Ollama's Llama 3.1 sometimes writes an XPath-style text match where a CSS
+# selector is expected - a[text()='Dropdown'] or a:contains('Dropdown') -
+# which isn't valid CSS/Playwright syntax and never matches anything. The
+# *intent* (match by visible text) is real, though, and maps directly onto
+# Playwright's own text= selector engine.
+_XPATH_TEXT_PATTERN = re.compile(r"""text\(\)\s*=\s*['"]([^'"]+)['"]""")
+_CONTAINS_TEXT_PATTERN = re.compile(r"""contains\([^,)]*,?\s*['"]([^'"]+)['"]\s*\)""")
 
 _SNAPSHOT_JS = """
 () => Array.from(document.querySelectorAll(
@@ -197,7 +204,14 @@ class ExplorerAgent:
         if not selector:
             return selector
         candidate = selector.strip()
-        if not candidate or candidate.startswith(_CSS_SELECTOR_PREFIX_CHARS) or " " in candidate:
+        if not candidate:
+            return selector
+
+        text_match = _XPATH_TEXT_PATTERN.search(candidate) or _CONTAINS_TEXT_PATTERN.search(candidate)
+        if text_match:
+            return f'text="{text_match.group(1)}"'
+
+        if candidate.startswith(_CSS_SELECTOR_PREFIX_CHARS) or " " in candidate:
             return selector
         for element in elements:
             if element.get("id") == candidate:
@@ -345,6 +359,17 @@ class ExplorerAgent:
                 return
 
             selector = self._resolve_selector(decision.get("selector"), snapshot["elements"])
+
+            if action == "navigate" and not value and selector:
+                # The model gave "navigate" a selector instead of a URL -
+                # almost always means "follow this link" rather than a URL
+                # it forgot to build, and executing it as a literal
+                # navigate always fails outright (no URL). Reinterpreted as
+                # a click on that same element instead of failing the exact
+                # same malformed decision 3 times in a row and tripping the
+                # loop guard below over something a click would've handled.
+                action = "click"
+
             signature = (action, selector, value)
             seen_signatures[signature] = seen_signatures.get(signature, 0) + 1
             if seen_signatures[signature] > MAX_IDENTICAL_ACTION_REPEATS:
@@ -463,8 +488,16 @@ Interactive elements on the page (tag, type, id, name, placeholder, visible text
 Decide the single next browser action needed to make progress on this step,
 using the real element info above to build the selector. The selector must
 be a real CSS selector, not a bare id/name string - if an element's "id" is
-"user-name", the selector is "#user-name", NOT "user-name". Respond with
-ONLY a JSON object, no other text, in exactly this shape:
+"user-name", the selector is "#user-name", NOT "user-name". Never use XPath
+syntax like [text()='X'] or :contains('X') - they are not valid CSS; to
+match by visible text use Playwright's own syntax instead: text="X".
+
+"navigate" is ONLY for typing a full URL directly (selector must be null,
+value must be the complete URL). To follow a link that's already on the
+page, use "click" with that link's selector instead - never "navigate"
+with a selector and no URL.
+
+Respond with ONLY a JSON object, no other text, in exactly this shape:
 {{"action": "fill"|"click"|"select"|"press"|"navigate"|"done", "selector": "<CSS selector, e.g. '#user-name', or null for navigate/done>", "value": "<text/URL/option value, or null>", "reasoning": "<one short sentence>"}}
 
 Use "done" only once the current page already satisfies this step.
@@ -490,6 +523,9 @@ Interactive elements on the page (tag, type, id, name, placeholder, visible text
 Decide ONE browser action that deliberately uses broken input for this step.
 The selector must be a real CSS selector, not a bare id/name string - if an
 element's "id" is "user-name", the selector is "#user-name", NOT "user-name".
-Respond with ONLY a JSON object, no other text, in exactly this shape:
+Never use XPath syntax like [text()='X'] or :contains('X') - they are not
+valid CSS; to match by visible text use Playwright's own syntax instead:
+text="X". Respond with ONLY a JSON object, no other text, in exactly this
+shape:
 {{"action": "fill"|"click"|"select"|"press", "selector": "<CSS selector, e.g. '#user-name'>", "value": "<deliberately invalid/empty value, or null>", "reasoning": "<what makes this input broken and what you expect to happen>"}}
 """

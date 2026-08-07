@@ -10,13 +10,17 @@ import { usePipelineRun } from "../hooks/usePipelineRun";
 import type { ModelChoice, Provider } from "../types/pipeline";
 import "./RunTest.css";
 
+// Claude first, then Ollama - the order the combined report reads in: each
+// provider's full report, then the comparison beneath both.
+const PROVIDER_ORDER: Provider[] = ["claude", "ollama"];
+
 function RunTest() {
   const [ticketId, setTicketId] = useState("");
   const [model, setModel] = useState<ModelChoice>("claude");
   const { status, feed, stages, frames, frameHistory, results, comparison, errorMessage, start, reset } = usePipelineRun();
 
   const running = status === "connecting" || status === "running";
-  const resultList = Object.values(results);
+  const resultList = PROVIDER_ORDER.map((p) => results[p]).filter((r) => r !== undefined);
 
   return (
     <div className="run-test-page">
@@ -108,18 +112,15 @@ function RunTest() {
 
       {resultList.length > 0 && (
         <div className="run-test-reports">
-          <h2 className="run-test-section-title">Report{resultList.length > 1 ? "s" : ""}</h2>
-          <div className="run-test-report-grid">
+          <h2 className="run-test-section-title">{resultList.length > 1 ? "Full Comparison Report" : "Report"}</h2>
+          <div className="run-test-report-stack">
             {resultList.map((result) => (
               <ReportCard result={result} key={result.provider} />
             ))}
+            {comparison && (
+              <ComparisonSummary comparison={comparison} claudeResult={results.claude} ollamaResult={results.ollama} />
+            )}
           </div>
-        </div>
-      )}
-
-      {comparison && (
-        <div className="run-test-comparison">
-          <ComparisonSummary comparison={comparison} />
         </div>
       )}
     </div>

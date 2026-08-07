@@ -16,6 +16,7 @@ import BarList from "../components/charts/BarList";
 import DonutChart from "../components/charts/DonutChart";
 import LineChart from "../components/charts/LineChart";
 import ProgressRing from "../components/charts/ProgressRing";
+import ComparisonSummary from "../components/ComparisonSummary";
 import LiveBrowserView from "../components/LiveBrowserView";
 import ModelSelector from "../components/ModelSelector";
 import PipelineTimeline from "../components/PipelineTimeline";
@@ -27,6 +28,10 @@ import { apiGet, ApiError } from "../services/api";
 import type { DailyStat, HistoryEntry, HistoryStats, ProviderStats } from "../types/history";
 import type { ModelChoice, Provider } from "../types/pipeline";
 import "./Dashboard.css";
+
+// Claude first, then Ollama - the order the combined report reads in:
+// each provider's full report, then the comparison beneath both.
+const PROVIDER_ORDER: Provider[] = ["claude", "ollama"];
 
 const AGENT_READY_ROW = [
   { name: "Planner", color: "var(--claude-color)" },
@@ -100,7 +105,7 @@ function Dashboard() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const running = status === "connecting" || status === "running";
-  const resultList = Object.values(results);
+  const resultList = PROVIDER_ORDER.map((p) => results[p]).filter((r) => r !== undefined);
   const primaryHistoryId = historyIds.claude ?? historyIds.ollama;
   const activeProviders = Object.keys(stages);
 
@@ -348,11 +353,14 @@ function Dashboard() {
 
           {resultList.length > 0 && (
             <section className="dash-panel">
-              <h2 className="dash-panel-title">Report{resultList.length > 1 ? "s" : ""}</h2>
-              <div className="dash-report-grid">
+              <h2 className="dash-panel-title">{resultList.length > 1 ? "Full Comparison Report" : "Report"}</h2>
+              <div className="dash-report-stack">
                 {resultList.map((result) => (
                   <ReportCard result={result} historyId={historyIds[result.provider]} key={result.provider} />
                 ))}
+                {comparison && (
+                  <ComparisonSummary comparison={comparison} claudeResult={results.claude} ollamaResult={results.ollama} />
+                )}
               </div>
               {primaryHistoryId && <AskAboutTest runId={primaryHistoryId} />}
             </section>
@@ -473,13 +481,6 @@ function Dashboard() {
           </section>
         </aside>
       </div>
-
-      {comparison && (
-        <section className="dash-panel">
-          <h2 className="dash-panel-title">Comparison Summary</h2>
-          <p className="dash-comparison-text">{comparison.summary}</p>
-        </section>
-      )}
     </div>
   );
 }

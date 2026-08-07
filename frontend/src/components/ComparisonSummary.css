@@ -11,6 +11,50 @@
   color: var(--text-h);
 }
 
+.comparison-screenshots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  margin-bottom: 1.1rem;
+}
+
+.comparison-screenshot-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.comparison-screenshot-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text);
+}
+
+.comparison-screenshot-block img {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  display: block;
+}
+
+.comparison-screenshot-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.comparison-chart {
+  margin-bottom: 1.1rem;
+}
+
 .comparison-table {
   display: flex;
   flex-direction: column;

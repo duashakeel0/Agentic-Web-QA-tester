@@ -472,9 +472,9 @@
   margin-top: var(--space-5);
 }
 
-.dash-report-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+.dash-report-stack {
+  display: flex;
+  flex-direction: column;
   gap: var(--space-4);
   margin-bottom: var(--space-4);
 }
@@ -583,13 +583,6 @@
   color: var(--text);
 }
 
-.dash-comparison-text {
-  margin: 0;
-  font-size: 13.5px;
-  line-height: 1.6;
-  color: var(--text-h);
-  white-space: pre-line;
-}
 
 @media (max-width: 1100px) {
   .dash-grid {

@@ -85,6 +85,36 @@ async def test_execute_step_treats_navigate_to_current_url_as_done(explorer):
     assert actions == []
 
 
+async def test_execute_step_reinterprets_navigate_with_selector_as_click(explorer):
+    # Reproduces the the_internet/dropdown loop: model repeats
+    # {"action": "navigate", "selector": "a[text()='Dropdown']", "value": null}
+    # 3x (invalid - navigate needs a URL) instead of clicking the link -
+    # should resolve the XPath-ish selector and click it instead of raising.
+    explorer._llm.queue('{"action": "navigate", "selector": "a[text()=\'Dropdown\']", "value": null, "reasoning": "go"}')
+    explorer._llm.queue('{"action": "done", "selector": null, "value": null, "reasoning": "done"}')
+    explorer._snapshot = _fake_snapshot
+    clicked: list[tuple] = []
+
+    async def _fake_execute(action, selector, value):
+        clicked.append((action, selector, value))
+        return True, None
+
+    explorer._execute_action = _fake_execute
+
+    actions: list[ActionLogEntry] = []
+    await explorer._execute_step("Navigate to /dropdown", actions)
+
+    assert clicked == [("click", 'text="Dropdown"', None)]
+    assert actions[0].action == "click"
+    assert actions[0].selector == 'text="Dropdown"'
+    assert actions[0].success is True
+
+
+def test_resolve_selector_normalizes_xpath_text_pattern():
+    assert ExplorerAgent._resolve_selector("a[text()='Dropdown']", []) == 'text="Dropdown"'
+    assert ExplorerAgent._resolve_selector("a:contains('Dropdown')", []) == 'text="Dropdown"'
+
+
 async def test_execute_step_raises_after_repeating_same_action(explorer):
     # Same action/selector/value every time - never "done" - should hit the loop guard.
     for _ in range(10):

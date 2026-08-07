@@ -164,14 +164,10 @@
   margin-bottom: 1.5rem;
 }
 
-.run-test-report-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+.run-test-report-stack {
+  display: flex;
+  flex-direction: column;
   gap: 1rem;
-}
-
-.run-test-comparison {
-  margin-bottom: 1.5rem;
 }
 
 @media (max-width: 720px) {
