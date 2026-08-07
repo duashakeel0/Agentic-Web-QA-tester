@@ -440,3 +440,20 @@ Running log of significant AI prompts used to build this project, per the intern
 - Confirmed the existing dropdown-click regression test still passes unaffected (it uses "click," which this change never touches).
 - Full backend suite (189 tests, +1) passes.
 - **Not yet completed:** this closes the specific case of fill/select/press being used where only navigate/click ever could work - it doesn't prevent the model from picking the *wrong* selector for a legitimate click/navigate on this step type, which is the same general model-accuracy ceiling flagged repeatedly. Worth another real run to confirm this exact failure is gone.
+
+---
+
+## Rewriting the auth/login step to remove URL-construction ambiguity
+
+**Context:** Belt-and-suspenders on top of the deterministic code fix above. The step read "Navigate to /auth/login" - a relative path, requiring the model to combine it with the domain's base URL itself (inferred from the current page's URL, since it's not stated outright anywhere in the prompt) to build the real "navigate" action's value. That's exactly the kind of small extra reasoning step a fast/weaker model can skip or botch, which is plausibly part of why it reached for the search bar instead in the first place.
+
+**Prompt:** "listen to me write auth/login steps again for ollama, pls make sure everything is correct."
+
+**What was generated:** `backend/app/domains/data/practice_software_testing.yaml` - the `login` and `checkout` workflows' first step changed from "Navigate to /auth/login" to "Navigate to the URL https://practicesoftwaretesting.com/auth/login (a direct page navigation - do not use the search bar or any other field on the page)" - the full absolute URL spelled out directly, plus an explicit reminder of what this step is (and isn't). Kept the literal "Navigate to" prefix at the very start on purpose - `_is_interactive_step()`'s classification (which controls both the nav_hint and the new fill/select/press rejection above) matches on that exact prefix; an earlier draft phrased it "Navigate directly to the URL..." which would have silently broken that classification and made things worse, caught before committing by directly testing `_is_interactive_step()` against the new text.
+
+**What was checked/modified before accepting:**
+- Directly verified `ExplorerAgent._is_interactive_step()` still returns `False` for the new step text before accepting it.
+- `load_domains()` loads the updated YAML with no schema errors.
+- Updated `test_planner.py`'s hardcoded end-to-end assertion (it asserted the real manifest's exact step text, since `PlannerAgent` always calls the real `load_domains()`) to match.
+- Full backend suite (189 tests) passes.
+- **Not yet completed:** left `contact_us`'s "Navigate to /contact" (same relative-path pattern, same theoretical risk) untouched - the user's request was specifically about auth/login; happy to apply the same treatment there and to the other domains' relative-path navigate steps if wanted, but didn't do it unprompted.

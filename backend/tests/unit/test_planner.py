@@ -34,7 +34,8 @@ async def test_plan_end_to_end_matched(monkeypatch, planner):
     assert plan.domain == "practice_software_testing"
     assert plan.workflow == "login"
     assert plan.steps == [
-        "Navigate to /auth/login",
+        "Navigate to the URL https://practicesoftwaretesting.com/auth/login "
+        "(a direct page navigation - do not use the search bar or any other field on the page)",
         'Enter "customer@practicesoftwaretesting.com" into the Email field',
         'Enter "welcome01" into the Password field',
         "Click the Login button",

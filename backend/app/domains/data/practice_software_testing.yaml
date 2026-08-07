@@ -7,7 +7,7 @@ base_url: https://practicesoftwaretesting.com
 workflows:
   - name: login
     steps:
-      - Navigate to /auth/login
+      - Navigate to the URL https://practicesoftwaretesting.com/auth/login (a direct page navigation - do not use the search bar or any other field on the page)
       - Enter "customer@practicesoftwaretesting.com" into the Email field
       - Enter "welcome01" into the Password field
       - Click the Login button
@@ -59,7 +59,7 @@ workflows:
 
   - name: checkout
     steps:
-      - Navigate to /auth/login
+      - Navigate to the URL https://practicesoftwaretesting.com/auth/login (a direct page navigation - do not use the search bar or any other field on the page)
       - Enter "customer@practicesoftwaretesting.com" into the Email field
       - Enter "welcome01" into the Password field
       - Click the Login button
