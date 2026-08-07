@@ -344,3 +344,16 @@ Running log of significant AI prompts used to build this project, per the intern
 - New Ollama client unit tests: `keep_alive` is sent with the documented default, and is overridable via `OLLAMA_KEEP_ALIVE`.
 - Full backend suite (170 tests, +2) passes.
 - **Not yet completed, and explained plainly in chat:** `keep_alive` only prevents *repeated* reloads - it can't make the very first call (a cold Ollama server, nothing loaded yet) faster, and it can't speed up per-token generation on slow CPU hardware. For that, the real levers are outside this codebase: pre-warm Ollama once before a demo (`ollama run llama3.1 "hi"`), confirm it's actually using a GPU if one exists (`ollama ps`), or switch `OLLAMA_MODEL` to a smaller/faster model (e.g. `llama3.2:3b`) at the cost of some decision accuracy - a real tradeoff for the user to weigh, not something to change unilaterally.
+
+---
+
+## Switching the default model to llama3.2
+
+**Context:** Asked to check the output of a real `ollama ps` run - it showed `PROCESSOR: 100% CPU` with no GPU listed, running llama3.1 (8B, Q4_K_M). That confirms the earlier "switch to a smaller model" suggestion wasn't a hypothetical - this machine is genuinely compute-bound on CPU, where model size is the single biggest lever on speed. Given the go-ahead ("ok switch if u think if would be faster"), made the change instead of just describing it.
+
+**What was generated:** `backend/app/agents/ollama_client.py`'s `DEFAULT_MODEL` and `.env.example`'s `OLLAMA_MODEL` both changed from `llama3.1` to `llama3.2` (its default tag is the 3B variant - roughly a third the compute per token of the 8B model), with a comment explaining the CPU-bound tradeoff and how to check it (`ollama ps`) and revert (`llama3.1`) if selector-picking accuracy matters more than speed for a given run.
+
+**What was checked/modified before accepting:**
+- No test asserted the specific default model string, so nothing needed updating beyond the constant/env template themselves.
+- Full backend suite (170 tests) still passes.
+- **Not yet completed, and told plainly to the user:** this only takes effect once they run `ollama pull llama3.2` and either remove `OLLAMA_MODEL` from their real local `.env` (not the tracked `.env.example`) or set it to `llama3.2` explicitly - their `ollama ps` output showed llama3.1 already loaded from an existing local `.env`/prior pull, which this code change can't reach or edit. Also genuinely can't verify from this sandbox that 3B is meaningfully faster on their exact hardware or still accurate enough for the harder workflows (ParaBank's multi-field forms especially) - worth a real comparison run before relying on it for the actual presentation.
