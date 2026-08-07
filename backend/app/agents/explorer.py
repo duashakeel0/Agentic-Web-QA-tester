@@ -438,6 +438,40 @@ class ExplorerAgent:
                 # loop guard below over something a click would've handled.
                 action = "click"
 
+            if not self._is_interactive_step(step) and action in ("fill", "select", "press"):
+                # A navigation-only step (see nav_hint in _step_prompt) is
+                # asking to be on a different page, not to interact with
+                # anything currently on this one - "fill"/"select"/"press"
+                # can never accomplish that regardless of which element
+                # they target (only "navigate" or "click"-a-link can), so
+                # one here is always wrong, not just usually wrong. Most
+                # commonly shows up as typing real values into whatever
+                # text input the page happens to have (a search bar), which
+                # this rejects deterministically instead of letting
+                # Playwright actually type into it - fed back as a failed
+                # attempt (not silently dropped) so the next decision sees
+                # exactly why and which action types are actually valid here.
+                error = (
+                    f"{action!r} cannot satisfy a navigation-only step - "
+                    "use 'navigate' with a full URL, or 'click' a link, instead."
+                )
+                screenshot_url = await self._emit_action(
+                    step=step, action=action, selector=selector, value=value, success=False, error=error
+                )
+                entry = ActionLogEntry(
+                    step=step,
+                    action=action,
+                    selector=selector,
+                    value=value,
+                    reasoning=decision.get("reasoning"),
+                    success=False,
+                    error=error,
+                    screenshot_path=screenshot_url,
+                )
+                actions.append(entry)
+                step_actions.append(entry)
+                continue
+
             if any(a.action == action and a.selector == selector and a.value == value and a.success for a in step_actions):
                 # The model re-issued an action that already succeeded
                 # earlier this step instead of recognizing the step is

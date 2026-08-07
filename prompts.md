@@ -424,3 +424,19 @@ Running log of significant AI prompts used to build this project, per the intern
 - Fixed an existing test (`test_non_200_response_raises_llmerror`) that happened to use a 429 fixture - switched it to 500 so it still tests the generic non-200 path without accidentally exercising (and being slowed down by) the new retry logic.
 - Full backend suite (188 tests, +6 net) passes.
 - **Not yet completed:** can't verify against Groq's real rate limiter from this sandbox - the retry math (parsing "try again in Xs", waiting that long) is confirmed correct in isolation, but only a real run against a real exhausted quota confirms the whole exploration actually recovers smoothly instead of just failing slower. Also worth the user knowing this is a genuine free-tier ceiling, not a bug to fully eliminate - a workflow with a lot of steps in quick succession could still hit it more than 3 times in a row on a very busy account, at which point the run will fail with a clear rate-limit message rather than hang forever.
+
+---
+
+## Rejecting fill/select/press on a navigation-only step
+
+**Context:** A real Toolshop login run showed the model filling the login email into the page's search bar instead of navigating to /auth/login. The first step, "Navigate to /auth/login," is navigation-only - the prompt explicitly says not to interact with anything for this step. But that destination isn't the site's homepage, so the earlier deterministic skip (which only fires when the step's destination is exactly domain.base_url) didn't apply here; the model had to genuinely decide how to navigate, and instead of a real "navigate" action it typed real text into whatever input the page had. Same underlying instruction-following gap as the earlier hallucinated "#home" click, but this time the model chose "fill" instead of "click," and there was no existing guard against that action type on this step shape.
+
+**Prompt:** "its filling eail in search barr."
+
+**What was generated:** `backend/app/agents/explorer.py`'s `_execute_step` now deterministically rejects "fill"/"select"/"press" whenever the current step is navigation-only, before the action is ever attempted against the real page. This is narrower and safer than the earlier reverted attempt to block *all* non-"done" actions on non-interactive steps (which wrongly broke the case where a "navigate to X" step legitimately needs a click on a link) - fill/select/press specifically can never accomplish "get to a different page" regardless of which element they target, unlike click (can follow a link) or navigate (goes there directly), so rejecting only those two action types is unconditionally correct, not just usually correct. Recorded as a failed attempt (not silently dropped) so the model sees exactly why on its next decision, via the existing action-history block in the prompt.
+
+**What was checked/modified before accepting:**
+- New test reproduces the exact failure: a queued `fill` on a "Navigate to /auth/login" step is rejected without ever reaching Playwright, recorded as a failed action with a clear reason, and the subsequent real `navigate` decision executes normally and completes the step.
+- Confirmed the existing dropdown-click regression test still passes unaffected (it uses "click," which this change never touches).
+- Full backend suite (189 tests, +1) passes.
+- **Not yet completed:** this closes the specific case of fill/select/press being used where only navigate/click ever could work - it doesn't prevent the model from picking the *wrong* selector for a legitimate click/navigate on this step type, which is the same general model-accuracy ceiling flagged repeatedly. Worth another real run to confirm this exact failure is gone.

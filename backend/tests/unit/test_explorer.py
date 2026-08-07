@@ -162,6 +162,43 @@ async def test_execute_step_reinterprets_navigate_with_selector_as_click(explore
     assert actions[0].success is True
 
 
+async def test_execute_step_rejects_fill_on_a_navigation_only_step(explorer):
+    # Reproduces a real Toolshop failure: step 1 is "Navigate to
+    # /auth/login" (navigation-only - told not to interact with anything),
+    # but the model filled the page's search bar with the login email
+    # instead of issuing a real "navigate". A fill can never satisfy a
+    # navigation-only step regardless of which element it targets, so it
+    # should be rejected as a failed attempt (not executed against a real,
+    # unrelated element) and the next decision should get a real navigate.
+    explorer._llm.queue(
+        '{"action": "fill", "selector": "#search", "value": "customer@example.com", "reasoning": "search for it"}'
+    )
+    explorer._llm.queue(
+        '{"action": "navigate", "selector": null, "value": "https://x/auth/login", "reasoning": "go there"}'
+    )
+    explorer._llm.queue('{"action": "done", "selector": null, "value": null, "reasoning": "done"}')
+    explorer._snapshot = _fake_snapshot
+    executed: list[tuple] = []
+
+    async def _fake_execute(action, selector, value):
+        executed.append((action, selector, value))
+        return True, None
+
+    explorer._execute_action = _fake_execute
+
+    actions: list[ActionLogEntry] = []
+    await explorer._execute_step("Navigate to /auth/login", actions)
+
+    # The fill was never actually attempted against the real page - only
+    # the subsequent, valid navigate was.
+    assert executed == [("navigate", None, "https://x/auth/login")]
+    assert actions[0].action == "fill"
+    assert actions[0].success is False
+    assert "cannot satisfy a navigation-only step" in actions[0].error
+    assert actions[1].action == "navigate"
+    assert actions[1].success is True
+
+
 def test_resolve_selector_normalizes_xpath_text_pattern():
     assert ExplorerAgent._resolve_selector("a[text()='Dropdown']", []) == 'text="Dropdown"'
     assert ExplorerAgent._resolve_selector("a:contains('Dropdown')", []) == 'text="Dropdown"'
