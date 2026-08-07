@@ -6,6 +6,7 @@ import DashboardLayout from "./layouts/DashboardLayout";
 import Analytics from "./pages/Analytics";
 import Compare from "./pages/Compare";
 import Dashboard from "./pages/Dashboard";
+import DomainKnowledge from "./pages/DomainKnowledge";
 import History from "./pages/History";
 import HistoryReport from "./pages/HistoryReport";
 import LoginPage from "./pages/LoginPage";
@@ -70,6 +71,14 @@ function App() {
             element={
               <ProtectedDashboard>
                 <Analytics />
+              </ProtectedDashboard>
+            }
+          />
+          <Route
+            path="/domain-knowledge"
+            element={
+              <ProtectedDashboard>
+                <DomainKnowledge />
               </ProtectedDashboard>
             }
           />

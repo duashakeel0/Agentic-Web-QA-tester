@@ -243,3 +243,26 @@ Running log of significant AI prompts used to build this project, per the intern
 **What was generated:** Reverted the single-goal collapse - `parabank.yaml`, `practice_software_testing.yaml`, `automation_exercise.yaml`, `campushub.yaml` all went back to their detailed step lists, and `explorer.py`'s prompt/`MAX_ACTIONS_PER_STEP` reverted to the original step-at-a-time framing (byte-identical to before the collapse, confirmed via `git diff`).
 
 **What was checked/modified before accepting:** All 4 domains reload correctly with the restored steps; full backend suite (152 tests) passes.
+
+---
+
+## Broader workflow coverage + add domain knowledge from the dashboard
+
+**Context:** Mentor asked for two things: (1) each registered site should have a broad set of workflows ready to go, not just 2-3, so a spot request during the presentation doesn't need new code; (2) when a ticket comes back "no domain knowledge for this target," there should be a way to supply that knowledge from the dashboard instead of hand-editing a YAML file.
+
+**Prompt:** Expand ParaBank/Toolshop/AutomationExercise with realistic additional workflows (bank account services, checkout, negative-test scenarios, footer/category features actually documented on each real site). Build a real "add domain knowledge" feature: a dashboard page that lists every registered domain/workflow and a form to add a new workflow to an existing domain or register a brand-new one - written straight to the same YAML store the Planner reads, usable by a ticket immediately with no restart.
+
+**What was generated:**
+- `parabank.yaml`: +5 workflows (open_new_account, find_transactions, update_contact_info, request_loan, log_out) alongside the existing login/transfer_funds/pay_bill
+- `practice_software_testing.yaml`: +4 workflows (view_product_details, search_no_results, filter_by_category, a full checkout)
+- `automation_exercise.yaml`: +5 workflows (search_products, category_browse, subscribe_to_newsletter, login_invalid_credentials, write_product_review) - all confirmed against the site's own documented test cases
+- `backend/app/domains/manifest.py` - `slugify()` and `save_workflow()`, the write side of the domain knowledge store `load_domains()` already reads: creates a new domain's YAML file or appends/replaces a named workflow in an existing one
+- `backend/app/main.py` - `GET /api/domains` (list everything registered) and `POST /api/domains` (add a workflow), both auth-gated, validating that at least one of url_contains/text_contains is given (otherwise nothing could ever verify the workflow) and that a brand-new domain has a base_url
+- `frontend/src/pages/DomainKnowledge.tsx` - new page: a form (domain name with autocomplete against existing ones, base URL for new domains, workflow name, a dynamic step list, expected outcome) plus a live list of every registered domain and its workflows. New sidebar nav item + route.
+
+**What was checked/modified before accepting:**
+- New unit tests for `slugify`/`save_workflow` (new domain, appending a second workflow, replacing a same-named workflow) and functional tests for both endpoints (success, missing expected_outcome, empty steps, missing base_url on a new domain, unauthenticated) - all against an isolated temp directory, never the real YAML files
+- New frontend tests: the page lists registered domains/workflows correctly, rejects a submission with no url_contains/text_contains, and a real submission posts the right payload and shows the success message
+- Left CampusHub's YAML untouched - couldn't find a CampusHub repo on the connected GitHub account to read its actual routes/features from (only the empty Vite-scaffold `-arbisoft-internship` repo exists there), so didn't invent workflows for functionality that might not exist
+- Full backend suite (163 tests) and frontend suite (18 tests) pass; `tsc`/`oxlint` clean
+- **Not yet completed:** same caveat as the earlier domain swap - the new ParaBank/Toolshop/AutomationExercise workflows are sourced from web search against each site's own docs, not a live page load (this sandbox's egress is locked to an allowlist), so still needs a real local run to confirm before relying on them for the presentation

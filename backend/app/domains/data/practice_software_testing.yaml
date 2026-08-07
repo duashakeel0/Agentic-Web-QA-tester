@@ -35,3 +35,41 @@ workflows:
       - Click the Send button
     expected_outcome:
       text_contains: Thanks for your message
+
+  - name: view_product_details
+    steps:
+      - Navigate to the homepage
+      - Open the first product listed
+    expected_outcome:
+      text_contains: Add to cart
+
+  - name: search_no_results
+    steps:
+      - Navigate to the homepage
+      - Search for "zzzznonexistentproduct123" using the search bar
+    expected_outcome:
+      text_contains: No results
+
+  - name: filter_by_category
+    steps:
+      - Navigate to the homepage
+      - Filter the products by the "Hand Tools" category using the category filter
+    expected_outcome:
+      text_contains: Hand Tools
+
+  - name: checkout
+    steps:
+      - Navigate to /auth/login
+      - Enter "customer@practicesoftwaretesting.com" into the Email field
+      - Enter "welcome01" into the Password field
+      - Click the Login button
+      - Search for "pliers" using the search bar
+      - Open the first matching product
+      - Add the product to the cart
+      - Open the cart
+      - Proceed to checkout
+      - Confirm or fill in the billing address
+      - Select "Cash on Delivery" as the payment method
+      - Confirm and place the order
+    expected_outcome:
+      text_contains: Payment was successful

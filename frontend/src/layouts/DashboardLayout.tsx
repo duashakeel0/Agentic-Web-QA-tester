@@ -4,6 +4,7 @@ import {
   BarChart3,
   ChevronsLeft,
   ChevronsRight,
+  Database,
   GitCompare,
   History,
   LayoutDashboard,
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { to: "/history", label: "Test History", icon: History },
   { to: "/compare", label: "Model Comparison", icon: GitCompare },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/domain-knowledge", label: "Domain Knowledge", icon: Database },
 ];
 
 // Not literal server health - these agents are functions, not long-running

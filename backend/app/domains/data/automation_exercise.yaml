@@ -26,3 +26,46 @@ workflows:
       - Click the Submit button
     expected_outcome:
       text_contains: Success! Your details have been submitted successfully.
+
+  - name: search_products
+    steps:
+      - Navigate to /products
+      - Search for "top" using the search bar
+    expected_outcome:
+      text_contains: SEARCHED PRODUCTS
+
+  - name: category_browse
+    steps:
+      - Navigate to the homepage
+      - Open the "Women" category from the left sidebar, then the "Dress" subcategory
+    expected_outcome:
+      text_contains: WOMEN - DRESS PRODUCTS
+
+  - name: subscribe_to_newsletter
+    steps:
+      - Navigate to the homepage
+      - Scroll to the Subscription section in the footer
+      - Enter "jordan.lee@example.com" into the subscription email field
+      - Click the subscribe button
+    expected_outcome:
+      text_contains: You have been successfully subscribed!
+
+  - name: login_invalid_credentials
+    steps:
+      - Navigate to /login
+      - Enter "nonexistent@example.com" into the login Email field
+      - Enter "wrongpassword123" into the login Password field
+      - Click the login form's Login button
+    expected_outcome:
+      text_contains: Your email or password is incorrect!
+
+  - name: write_product_review
+    steps:
+      - Navigate to /products
+      - Open the first product listed
+      - Enter "Jordan Lee" into the review Name field
+      - Enter "jordan.lee@example.com" into the review Email field
+      - Enter "Great product, works as expected." into the review Message field
+      - Click the review form's Submit button
+    expected_outcome:
+      text_contains: Thank you for your review.

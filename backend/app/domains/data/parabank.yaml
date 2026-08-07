@@ -53,3 +53,63 @@ workflows:
       - Click the Send Payment button
     expected_outcome:
       text_contains: Bill Payment Complete
+
+  - name: open_new_account
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Open the Open New Account page from Account Services
+      - Select "SAVINGS" as the account type
+      - Select the first available account to fund it from
+      - Click the Open New Account button
+    expected_outcome:
+      text_contains: Account Opened!
+
+  - name: find_transactions
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Open the Find Transactions page from Account Services
+      - Select the first available account
+    expected_outcome:
+      text_contains: Find Transactions
+
+  - name: update_contact_info
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Open the Update Contact Info page from Account Services
+      - Enter "5559876543" as the phone number
+      - Click the Update Profile button
+    expected_outcome:
+      text_contains: Profile Updated
+
+  - name: request_loan
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Open the Request Loan page from Account Services
+      - Enter "5000" as the loan amount
+      - Enter "1000" as the down payment
+      - Select the first available account to fund the down payment from
+      - Click the Apply Now button
+    expected_outcome:
+      text_contains: Loan Request Processed
+
+  - name: log_out
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Click the Log Out link
+    expected_outcome:
+      text_contains: Customer Login

@@ -32,6 +32,8 @@ from app.agents.llm_client import LLMError
 from app.agents.pipeline import run_both, run_pipeline
 from app.auth import AuthError, login as auth_login, logout as auth_logout, require_auth, require_auth_ws
 from app.browser import BrowserSession
+from app.domains.manifest import load_domains, save_workflow, slugify
+from app.domains.schema import Domain, ExpectedOutcome, Workflow
 from app.history.schema import ComparisonHistoryEntry, DailyStat, HistoryDetail, HistoryEntry, HistoryStats, ProviderStats
 from app.history.store import HistoryStore
 from app.pdf_report import generate_report_pdf
@@ -341,6 +343,63 @@ Answer in 2-4 plain sentences, no other text.
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return AskResponse(answer=response.text)
+
+
+@app.get("/api/domains", response_model=list[Domain])
+async def list_domains(_token: str = Depends(require_auth)) -> list[Domain]:
+    """Everything the Planner/Explorer/Verifier can currently test against -
+    what the dashboard's Domain Knowledge page shows before you add to it."""
+    return load_domains()
+
+
+class WorkflowIn(BaseModel):
+    name: str
+    steps: list[str]
+    url_contains: str | None = None
+    text_contains: str | None = None
+
+
+class DomainKnowledgeIn(BaseModel):
+    domain: str
+    base_url: str = ""  # only required when domain is new - ignored for an existing one
+    workflow: WorkflowIn
+
+
+@app.post("/api/domains", response_model=Domain)
+async def add_domain_knowledge(body: DomainKnowledgeIn, _token: str = Depends(require_auth)) -> Domain:
+    """Adds one workflow to a domain from the dashboard instead of hand-
+    editing a YAML file - the same "no domain knowledge for this target"
+    gap the Planner reports on an unmatched ticket, closed live. Writes
+    straight to the same domain knowledge store the Planner reads, so a
+    ticket can reference what was just added immediately, no restart
+    needed (unlike credentials baked into a workflow's steps at YAML
+    creation time - those still need editing directly)."""
+    if not body.domain.strip():
+        raise HTTPException(status_code=400, detail="Domain name is required.")
+    if not body.workflow.name.strip():
+        raise HTTPException(status_code=400, detail="Workflow name is required.")
+
+    steps = [s.strip() for s in body.workflow.steps if s.strip()]
+    if not steps:
+        raise HTTPException(status_code=400, detail="At least one step is required.")
+
+    url_contains = (body.workflow.url_contains or "").strip() or None
+    text_contains = (body.workflow.text_contains or "").strip() or None
+    if not url_contains and not text_contains:
+        raise HTTPException(
+            status_code=400, detail="Provide at least one of url_contains or text_contains, or nothing can ever verify this workflow."
+        )
+
+    existing = next((d for d in load_domains() if d.name == slugify(body.domain)), None)
+    if existing is None and not body.base_url.strip():
+        raise HTTPException(status_code=400, detail="base_url is required when registering a new domain.")
+
+    workflow = Workflow(
+        name=slugify(body.workflow.name),
+        steps=steps,
+        expected_outcome=ExpectedOutcome(url_contains=url_contains, text_contains=text_contains),
+    )
+    return save_workflow(body.domain, body.base_url, workflow)
 
 
 CHAT_HISTORY_LIMIT = 12  # turns kept in the prompt, not stored server-side
