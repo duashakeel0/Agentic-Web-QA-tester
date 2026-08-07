@@ -285,6 +285,30 @@ def test_resolve_selector_leaves_unmatched_selector_alone():
     assert resolved == "nonexistent"
 
 
+def test_resolve_selector_corrects_wrong_case_bare_id_selector():
+    # Reproduces a real Toolshop failure: the model wrote "#Email" (echoing
+    # the human-readable "Email field" label's capitalization) instead of
+    # the real snapshot id "email" - CSS id selectors are case-sensitive,
+    # so that guess always fails outright even though it's clearly meant
+    # to be this exact element.
+    elements = [{"tag": "input", "type": "email", "id": "email", "name": None, "placeholder": "Email", "text": ""}]
+    resolved = ExplorerAgent._resolve_selector("#Email", elements)
+    assert resolved == "#email"
+
+
+def test_resolve_selector_leaves_exact_case_bare_id_selector_alone():
+    resolved = ExplorerAgent._resolve_selector("#user-name", _SNAPSHOT_ELEMENTS)
+    assert resolved == "#user-name"
+
+
+def test_resolve_selector_leaves_bare_id_alone_when_no_case_insensitive_match():
+    # "#already-a-selector" isn't a near-miss of anything in the snapshot -
+    # no element to correct it to, so it's left exactly as given rather
+    # than guessed at.
+    resolved = ExplorerAgent._resolve_selector("#already-a-selector", _SNAPSHOT_ELEMENTS)
+    assert resolved == "#already-a-selector"
+
+
 async def test_emit_action_sends_screenshot_and_target_box(tmp_path, monkeypatch):
     monkeypatch.setattr(explorer_module, "ACTION_SCREENSHOT_DIR", str(tmp_path))
     events: list[dict] = []

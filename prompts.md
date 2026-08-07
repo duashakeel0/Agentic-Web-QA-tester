@@ -457,3 +457,19 @@ Running log of significant AI prompts used to build this project, per the intern
 - Updated `test_planner.py`'s hardcoded end-to-end assertion (it asserted the real manifest's exact step text, since `PlannerAgent` always calls the real `load_domains()`) to match.
 - Full backend suite (189 tests) passes.
 - **Not yet completed:** left `contact_us`'s "Navigate to /contact" (same relative-path pattern, same theoretical risk) untouched - the user's request was specifically about auth/login; happy to apply the same treatment there and to the other domains' relative-path navigate steps if wanted, but didn't do it unprompted.
+
+---
+
+## Case-sensitive id near-miss (#Email vs. #email)
+
+**Context:** A real run after the previous fix showed genuine progress - it navigated to the login page correctly this time - but then failed the next step: `fill on #Email — Timed out waiting for '#Email'`. The real element's id is (almost certainly) lowercase `email`; the model wrote `#Email`, echoing the capitalization of the step's human-readable label ("the Email field") instead of the actual id it was shown in the snapshot. CSS id selectors are case-sensitive, so a wrong-case guess fails outright even though it's obviously meant to be that exact element - the existing bare-id correction (`_resolve_selector`) didn't catch this because it only fires for a selector with no `#`/`.`/etc prefix at all; `#Email` already "looks like" a real CSS selector so it sailed through unchanged.
+
+**Prompt:** "youve clearly written write this in email field, isk why its nt getting it."
+
+**What was generated:** `_resolve_selector` now also checks any plain `#some-id`-shaped selector (nothing more elaborate - no combinators/attributes/spaces, so it never touches a genuinely complex selector) against the snapshot: if there's no exact-case id match but there IS a case-insensitive one, the selector is corrected to the real casing before Playwright ever sees it.
+
+**What was checked/modified before accepting:**
+- New tests: `#Email` against a snapshot with a real `email` id resolves to `#email`; an exact-case match is left alone; a selector with no case-insensitive match anywhere in the snapshot (nothing to correct it to) is left exactly as given rather than guessed at.
+- Confirmed the existing "leaves a real CSS selector alone" test still passes - a bare-id-shaped selector with no near-miss in the snapshot falls through unchanged, same as before.
+- Full backend suite (192 tests, +3) passes.
+- **Not yet completed:** same general caveat as every accuracy fix so far - this closes one specific, common near-miss (case-only mismatch on an otherwise-correct id), not selector accuracy in general. A completely wrong id, or a case mismatch combined with something else off, would still fail. Worth another real run to see how far through the workflow it gets now.

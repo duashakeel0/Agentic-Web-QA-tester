@@ -74,6 +74,10 @@ _CSS_SELECTOR_PREFIX_CHARS = ("#", ".", "[", "*", ">", "~", "+", ":")
 # Playwright's own text= selector engine.
 _XPATH_TEXT_PATTERN = re.compile(r"""text\(\)\s*=\s*['"]([^'"]+)['"]""")
 _CONTAINS_TEXT_PATTERN = re.compile(r"""contains\([^,)]*,?\s*['"]([^'"]+)['"]\s*\)""")
+# Matches only a plain "#some-id" selector - not "#foo .bar", "#foo[x=y]",
+# or anything more elaborate - since only this simple shape is safe to
+# rewrite by matching against a single element's real id.
+_BARE_ID_SELECTOR_PATTERN = re.compile(r"^#([\w-]+)$")
 
 _SNAPSHOT_JS = """
 () => Array.from(document.querySelectorAll(
@@ -245,6 +249,23 @@ class ExplorerAgent:
         text_match = _XPATH_TEXT_PATTERN.search(candidate) or _CONTAINS_TEXT_PATTERN.search(candidate)
         if text_match:
             return f'text="{text_match.group(1)}"'
+
+        bare_id_match = _BARE_ID_SELECTOR_PATTERN.match(candidate)
+        if bare_id_match:
+            id_part = bare_id_match.group(1)
+            if not any(element.get("id") == id_part for element in elements):
+                for element in elements:
+                    el_id = element.get("id")
+                    if el_id and el_id.lower() == id_part.lower():
+                        # A model sometimes echoes the human-readable field
+                        # label's capitalization ("#Email", from "the Email
+                        # field") instead of the real id it was shown in the
+                        # snapshot ("email") - CSS id selectors are
+                        # case-sensitive, so that guess always fails
+                        # outright even though it's clearly meant to be
+                        # this exact element. Corrected to the real casing.
+                        return f"#{el_id}"
+            return selector
 
         if candidate.startswith(_CSS_SELECTOR_PREFIX_CHARS) or " " in candidate:
             return selector
