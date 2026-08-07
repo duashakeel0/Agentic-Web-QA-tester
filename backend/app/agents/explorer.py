@@ -136,6 +136,10 @@ class ExplorerAgent:
         return {"url": page.url, "title": await page.title(), "elements": elements}
 
     @staticmethod
+    def _same_url(a: str, b: str) -> bool:
+        return a.rstrip("/") == b.rstrip("/")
+
+    @staticmethod
     def _resolve_selector(selector: str | None, elements: list[dict]) -> str | None:
         """A weaker model (Ollama's local Llama 3.1 especially) sometimes
         echoes an element's bare id/name straight from the snapshot instead
@@ -214,8 +218,20 @@ class ExplorerAgent:
             if action == "done":
                 return
 
-            selector = self._resolve_selector(decision.get("selector"), snapshot["elements"])
             value = decision.get("value")
+            if action == "navigate" and value and self._same_url(value, snapshot["url"]):
+                # The model asked to navigate to the page it's already on -
+                # for a navigation-only step that IS "done", just phrased as
+                # a navigate. Told to answer "done" directly in this case
+                # (see the nav_hint in _step_prompt), but a weaker model
+                # (Ollama's) doesn't reliably follow that and instead
+                # re-issues the same no-op navigate call every time,
+                # tripping the identical-action loop guard below. Checked
+                # deterministically here so the step still completes
+                # regardless of whether the model phrases it correctly.
+                return
+
+            selector = self._resolve_selector(decision.get("selector"), snapshot["elements"])
             signature = (action, selector, value)
             seen_signatures[signature] = seen_signatures.get(signature, 0) + 1
             if seen_signatures[signature] > MAX_IDENTICAL_ACTION_REPEATS:

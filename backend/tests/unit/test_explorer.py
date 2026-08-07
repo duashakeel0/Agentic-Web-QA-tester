@@ -37,6 +37,27 @@ async def test_execute_step_stops_on_done(explorer):
     assert actions[0].success is True
 
 
+async def test_execute_step_treats_navigate_to_current_url_as_done(explorer):
+    # Reproduces the Sauce Demo login loop: a weaker model re-issues
+    # "navigate" to the exact page it's already on instead of answering
+    # "done" - should complete the step instead of looping/raising.
+    for _ in range(3):
+        explorer._llm.queue(
+            '{"action": "navigate", "selector": null, "value": "https://www.saucedemo.com/", "reasoning": "go there"}'
+        )
+
+    async def _snapshot_at_saucedemo():
+        return {"url": "https://www.saucedemo.com/", "title": "t", "elements": []}
+
+    explorer._snapshot = _snapshot_at_saucedemo
+    explorer._execute_action = _fake_action_success
+
+    actions: list[ActionLogEntry] = []
+    await explorer._execute_step("Navigate to saucedemo.com", actions)
+
+    assert actions == []
+
+
 async def test_execute_step_raises_after_repeating_same_action(explorer):
     # Same action/selector/value every time - never "done" - should hit the loop guard.
     for _ in range(10):
