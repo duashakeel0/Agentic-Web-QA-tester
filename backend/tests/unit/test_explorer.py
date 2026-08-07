@@ -167,15 +167,40 @@ def test_resolve_selector_normalizes_xpath_text_pattern():
     assert ExplorerAgent._resolve_selector("a:contains('Dropdown')", []) == 'text="Dropdown"'
 
 
-async def test_execute_step_raises_after_repeating_same_action(explorer):
-    # Same action/selector/value every time - never "done" - should hit the loop guard.
+async def test_execute_step_raises_after_repeating_same_failing_action(explorer):
+    # Same action/selector/value every time, and it keeps FAILING - a
+    # genuinely stuck step, never "done" - should hit the loop guard.
     for _ in range(10):
         explorer._llm.queue('{"action": "click", "selector": "#x", "value": null, "reasoning": "again"}')
     explorer._snapshot = _fake_snapshot
-    explorer._execute_action = _fake_action_success
+    explorer._execute_action = _fake_action_failure
 
     with pytest.raises(ExplorerError, match="repeated the same action"):
         await explorer._execute_step("Click something", [])
+
+
+async def test_execute_step_completes_when_repeating_an_already_succeeded_action(explorer):
+    # Reproduces a real Toolshop login failure: the model filled the Email
+    # field successfully, then re-issued the exact same fill 2 more times
+    # instead of recognizing the step was already done (a fast/weaker
+    # model especially) - should complete gracefully after the first
+    # success instead of raising once the identical-action guard would
+    # otherwise trip, since nothing was ever actually stuck/failing.
+    for _ in range(3):
+        explorer._llm.queue(
+            '{"action": "fill", "selector": "#email", "value": "customer@example.com", "reasoning": "fill it"}'
+        )
+    explorer._snapshot = _fake_snapshot
+    explorer._execute_action = _fake_action_success
+
+    actions: list[ActionLogEntry] = []
+    await explorer._execute_step("Enter the email", actions)
+
+    # Only the first attempt was ever actually executed - the repeat(s)
+    # were recognized as redundant and treated as implicit completion
+    # instead of being re-attempted or tripping the loop guard.
+    assert len(actions) == 1
+    assert actions[0].success is True
 
 
 async def test_execute_step_raises_after_max_actions_without_done(explorer):
@@ -383,6 +408,10 @@ async def _fake_snapshot():
 
 async def _fake_action_success(action, selector, value):
     return True, None
+
+
+async def _fake_action_failure(action, selector, value):
+    return False, "element not found"
 
 
 async def test_live_frame_loop_emits_periodic_untagged_frame_events(tmp_path, monkeypatch):

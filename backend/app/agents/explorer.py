@@ -438,6 +438,20 @@ class ExplorerAgent:
                 # loop guard below over something a click would've handled.
                 action = "click"
 
+            if any(a.action == action and a.selector == selector and a.value == value and a.success for a in step_actions):
+                # The model re-issued an action that already succeeded
+                # earlier this step instead of recognizing the step is
+                # done - e.g. re-filling the same field with the same
+                # value repeatedly rather than answering "done" (told to
+                # in the prompt/history above, but a weaker or
+                # speed-optimized model doesn't always follow it). The
+                # field's already in that state; repeating it again can
+                # only ever be a no-op, so it's treated as implicit
+                # completion instead of burning the action budget or
+                # eventually tripping the loop guard below into a hard
+                # failure over something that was never actually stuck.
+                return
+
             signature = (action, selector, value)
             seen_signatures[signature] = seen_signatures.get(signature, 0) + 1
             if seen_signatures[signature] > MAX_IDENTICAL_ACTION_REPEATS:

@@ -392,3 +392,19 @@ Running log of significant AI prompts used to build this project, per the intern
 - New pipeline test: `make_llm("ollama")` returns the local client by default, and the Groq client only once `OLLAMA_BACKEND=groq` is explicitly set - and confirms the returned client's `provider` is still `"ollama"`, not a new value.
 - Full backend suite (183 tests, +11) passes.
 - **Not yet completed:** no real Groq API key available in this sandbox to verify against Groq's actual live API (only the shape of its documented OpenAI-compatible endpoint) - worth a real run once the user has a free Groq key to confirm both the request/response format and that it's actually meaningfully faster on their hardware.
+
+---
+
+## Loop guard was failing a step that had actually already succeeded
+
+**Context:** After switching to Groq (confirmed genuinely ~10x faster in a real run - 85s total vs. multi-minute local runs), a real report showed a *new* failure: a Toolshop login run failed with "Explorer repeated the same action 3 times on step 'Enter customer@practicesoftwaretesting.com into the Email field' (fill on '#email') - stopping to avoid a loop," at 100% action accuracy. The fill genuinely succeeded every single time (Playwright had no trouble with it) - the model just kept re-issuing the exact same already-successful fill instead of recognizing the step was done and moving on, despite the prompt's history block explicitly saying "do not repeat one that already succeeded." Same accuracy-vs-speed tradeoff as the earlier hallucinated-selector case, different symptom: this time the model wasn't wrong about *what* to do, just failed to recognize *when to stop*.
+
+**Prompt:** shown the report, "speed is 10x better but" [this failure].
+
+**What was generated:** `backend/app/agents/explorer.py`'s `_execute_step` now checks, before the identical-action loop guard: if the model's current decision exactly matches an action that already *succeeded* earlier this step, treat it as implicit "done" instead of re-executing it or letting it count toward the loop guard. This splits what the loop guard used to treat as one case (any repeated identical action = suspicious, fail after 2 repeats) into the two genuinely different situations it actually covers: a step repeatedly *failing* the same way is still a real stuck loop and still raises `ExplorerError` exactly as before; a step repeatedly *re-doing something that already worked* is virtually always the model failing to notice completion, not a real problem, so it now completes gracefully instead of failing the whole exploration over something that was never actually stuck.
+
+**What was checked/modified before accepting:**
+- The existing loop-guard regression test (`test_execute_step_raises_after_repeating_same_action`) turned out to assert the *old*, less correct behavior - it used a fake action that always "succeeds," so under the new logic it would complete gracefully instead of raising. Renamed/updated it to `test_execute_step_raises_after_repeating_same_failing_action` with a genuinely failing fake action, so it still validates the case that actually matters (a truly stuck step) instead of accidentally locking in the bug being fixed.
+- New test (`test_execute_step_completes_when_repeating_an_already_succeeded_action`) reproduces the exact real Toolshop failure - 3 identical successful fills queued, only the first is ever executed, the step completes cleanly rather than raising.
+- Full backend suite (184 tests, +1 net - one renamed/fixed, one new) passes.
+- **Not yet completed:** same as always with model-quality issues - this closes one specific recurring pattern (repeating an already-successful action) but doesn't make the model itself more reliable in general; a different kind of confusion could still surface on a different step shape. Worth another real run to confirm this exact failure is gone and watch for anything new.
