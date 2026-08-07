@@ -4,7 +4,7 @@ from app.domains.manifest import load_domains
 def test_load_domains_returns_all_registered_domains():
     domains = load_domains()
     names = {d.name for d in domains}
-    assert {"sauce_demo", "the_internet", "campushub", "amazon"} <= names
+    assert {"parabank", "practice_software_testing", "campushub", "automation_exercise"} <= names
 
 
 def test_every_domain_has_at_least_one_workflow():

@@ -14,7 +14,7 @@ def _entry(result: dict) -> HistoryDetail:
     return HistoryDetail(
         id=1,
         ticket_id="T1",
-        domain="sauce_demo",
+        domain="practice_software_testing",
         workflow="login",
         provider="ollama",
         matched=True,

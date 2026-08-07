@@ -20,7 +20,7 @@ class _FakePlanner:
     async def plan(self, ticket_id):
         await asyncio.sleep(0)
         return TestPlan(
-            ticket_id=ticket_id, matched=True, domain="sauce_demo", workflow="login",
+            ticket_id=ticket_id, matched=True, domain="practice_software_testing", workflow="login",
             steps=["Log in"], expected_outcome={"url_contains": "/inventory.html"},
         )
 

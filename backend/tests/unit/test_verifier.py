@@ -13,7 +13,7 @@ def verifier():
 
 def _exploration(**overrides):
     defaults = dict(
-        ticket_id="T1", domain="sauce_demo", workflow="login", completed=True,
+        ticket_id="T1", domain="practice_software_testing", workflow="login", completed=True,
         actions=[], final_url="https://x/inventory.html", final_page_text="Products",
     )
     defaults.update(overrides)

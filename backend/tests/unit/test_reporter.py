@@ -10,7 +10,7 @@ def reporter():
     return ReporterAgent(llm=FakeLLM())
 
 
-def _passing_run(domain="sauce_demo", workflow="login"):
+def _passing_run(domain="practice_software_testing", workflow="login"):
     exploration = ExplorationResult(
         ticket_id="T1", domain=domain, workflow=workflow, completed=True,
         actions=[ActionLogEntry(step="Log in", action="click", success=True)],
@@ -23,7 +23,7 @@ def _passing_run(domain="sauce_demo", workflow="login"):
     return RunResult(exploration=exploration, verification=verification)
 
 
-def _failing_run(domain="sauce_demo", workflow="login"):
+def _failing_run(domain="practice_software_testing", workflow="login"):
     exploration = ExplorationResult(
         ticket_id="T1", domain=domain, workflow=workflow, completed=True,
         actions=[
@@ -100,7 +100,7 @@ def test_render_summary_all_pass(reporter):
 
     assert text.startswith("Result: PASS")
     assert "1 passed, 0 failed out of 1 workflow(s)" in text
-    assert "[PASS] sauce_demo/login" in text
+    assert "[PASS] practice_software_testing/login" in text
 
 
 async def test_render_summary_mixed_pass_fail(reporter):
@@ -115,7 +115,7 @@ async def test_render_summary_mixed_pass_fail(reporter):
 
     assert text.startswith("Result: FAIL")
     assert "1 passed, 1 failed out of 2 workflow(s)" in text
-    assert "[PASS] sauce_demo/checkout" in text
+    assert "[PASS] practice_software_testing/checkout" in text
     assert "Failure reason: Login form rejects valid credentials." in text
     assert "Error message: Re-check navigation timed out." in text
     assert "Reproduction steps:" in text

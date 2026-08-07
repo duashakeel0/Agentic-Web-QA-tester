@@ -13,13 +13,13 @@ def store(tmp_path):
 
 def _result(ticket_id, provider, verdict, matched=True, findings=0, cost=0.01, coverage=1.0, accuracy=1.0, missed=None):
     verification = VerifierResult(
-        ticket_id=ticket_id, domain="sauce_demo", workflow="login", verdict=verdict,
+        ticket_id=ticket_id, domain="practice_software_testing", workflow="login", verdict=verdict,
         assertion_checked={}, initial_check_passed=(verdict == "pass"), retried=False,
     ) if matched else None
     report = Report(
         ticket_id=ticket_id,
         findings=[
-            Finding(ticket_id=ticket_id, domain="sauce_demo", workflow="login", severity="high",
+            Finding(ticket_id=ticket_id, domain="practice_software_testing", workflow="login", severity="high",
                      summary="broke", reproduction_steps=[])
             for _ in range(findings)
         ],
@@ -31,7 +31,7 @@ def _result(ticket_id, provider, verdict, matched=True, findings=0, cost=0.01, c
     )
     return PipelineResult(
         ticket_id=ticket_id, provider=provider,
-        plan=TestPlan(ticket_id=ticket_id, matched=matched, domain="sauce_demo" if matched else None,
+        plan=TestPlan(ticket_id=ticket_id, matched=matched, domain="practice_software_testing" if matched else None,
                        workflow="login" if matched else None, steps=["a", "b", "c"] if matched else []),
         verification=verification, report=report, metrics=metrics,
         started_at=0.0, finished_at=0.05, total_duration_ms=50.0,

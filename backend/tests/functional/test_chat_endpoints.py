@@ -82,7 +82,7 @@ async def test_ask_about_report_404_when_run_missing(client, auth_headers):
 async def test_ask_about_report_returns_grounded_answer(client, auth_headers, app_history, monkeypatch):
     result = PipelineResult(
         ticket_id="T1", provider="claude",
-        plan=TestPlan(ticket_id="T1", matched=True, domain="sauce_demo", workflow="login", steps=["a"]),
+        plan=TestPlan(ticket_id="T1", matched=True, domain="practice_software_testing", workflow="login", steps=["a"]),
         started_at=0.0, finished_at=0.5, total_duration_ms=500.0,
     )
     run_id = await app_history.record_run(result)

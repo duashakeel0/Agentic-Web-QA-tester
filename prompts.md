@@ -193,4 +193,22 @@ Running log of significant AI prompts used to build this project, per the intern
 - `post_summary` retried exactly once on failure (2 total attempts, not more), correctly marked `failed` with the real error attached afterward, and confirmed the local report (all findings, reproduction steps, screenshots) still generates in full even though the write-back never succeeded
 - A severity-classification call that fails/times out defaults to "high" rather than silently dropping or downgrading a real finding, and still triggers its alert
 - Reproduction steps are built only from the real action sequence, excluding the deliberate broken-input attempts logged by the Explorer, so they actually reproduce the confirmed bug rather than the intentional bad-input detour
+
+---
+
+## Domain Knowledge Refresh — Replacing the shallow practice sites with full-workflow ones
+
+**Context:** Mentor feedback: `sauce_demo`, `the_internet`, and the read-only `amazon` add-on were too shallow - single-form widget tests, not the kind of whole, multi-step workflow (login → find something → do something → confirm) the proposal actually describes. Registered domains needed to change without touching the proposal document itself.
+
+**Prompt:** Replace the 3 shallow registered domains with deeper ones while keeping the self-built `campushub` domain untouched: ParaBank (Parasoft's public demo banking app - login, transfer funds, pay a bill), practicesoftwaretesting.com/Toolshop (login, browse + add to cart, contact form), and automationexercise.com (browse + add to cart, contact form) - all sites built specifically for QA automation practice, matching the proposal's own stated selection criteria (Section 7).
+
+**What was generated:**
+- `backend/app/domains/data/parabank.yaml`, `practice_software_testing.yaml`, `automation_exercise.yaml` - new domain files, 2-3 workflows each
+- Removed `sauce_demo.yaml`, `the_internet.yaml`, `amazon.yaml`
+- Updated every test fixture that referenced the removed domain names (`test_domains_manifest.py`, `test_planner.py`, plus fixture-only mentions across the reporter/verifier/pipeline/history-store/PDF-report/functional test suites and the frontend's `ReportCard.test.tsx`) - left `test_explorer.py`'s Sauce Demo/the-internet references alone since those reproduce specific historical bugs against the sites where they actually happened, not domain declarations
+
+**What was checked/modified before accepting:**
+- `load_domains()` loads all 4 new/kept domains correctly with no schema errors
+- Full backend suite (147 tests) and frontend suite (14 tests) pass; `tsc`/`oxlint` clean
+- **Not yet completed, and worth flagging explicitly:** this sandbox's network egress is locked down to an allowlist that excludes these sites, so routes/success text were sourced from web search (each site's own test-case docs, well-known public test suites against them) rather than by loading the live pages directly - confidence is high for automationexercise.com and ParaBank's page-level flow (both extremely well-documented, stable QA-practice targets), lower for exact wording on practicesoftwaretesting.com's cart/checkout copy. ParaBank also has no fixed public login (unlike Sauce Demo) - its `login`/`transfer_funds`/`pay_bill` workflows have placeholder credentials that need a real registered ParaBank account swapped in before they'll pass. All of this needs a real local run to confirm, the same way Day 6/7's Ollama-dependent live verification did.
 - Re-ran the full Day 7 Verifier test suite after adding screenshot capture to confirm nothing regressed

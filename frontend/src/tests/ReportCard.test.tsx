@@ -7,7 +7,7 @@ import type { PipelineResult } from "../types/pipeline";
 function basePlan(overrides: Partial<PipelineResult["plan"]> = {}): PipelineResult["plan"] {
   return {
     ticket_id: "T1", ticket_title: "Verify login works", matched: true,
-    reason: null, domain: "sauce_demo", workflow: "login", steps: ["Log in"],
+    reason: null, domain: "practice_software_testing", workflow: "login", steps: ["Log in"],
     expected_outcome: { url_contains: "/inventory.html" },
     ...overrides,
   };
@@ -17,11 +17,11 @@ function passingResult(): PipelineResult {
   return {
     ticket_id: "T1", provider: "claude", plan: basePlan(),
     exploration: {
-      ticket_id: "T1", domain: "sauce_demo", workflow: "login", completed: true,
+      ticket_id: "T1", domain: "practice_software_testing", workflow: "login", completed: true,
       actions: [], final_url: "https://x/inventory.html", final_page_text: "Products", error: null,
     },
     verification: {
-      ticket_id: "T1", domain: "sauce_demo", workflow: "login", verdict: "pass",
+      ticket_id: "T1", domain: "practice_software_testing", workflow: "login", verdict: "pass",
       assertion_checked: {}, initial_check_passed: true, retried: false, retry_passed: null,
       retry_error: null, explanation: null, explanation_status: "ok", screenshot_path: null,
     },
@@ -39,7 +39,7 @@ function failingResult(): PipelineResult {
       ticket_id: "T1",
       findings: [
         {
-          ticket_id: "T1", domain: "sauce_demo", workflow: "login", severity: "high",
+          ticket_id: "T1", domain: "practice_software_testing", workflow: "login", severity: "high",
           summary: "Login button does not respond.", error_message: "Timed out waiting for '#login-button'",
           reproduction_steps: ["click on #login-button"], screenshot_path: null, explanation: null,
         },

@@ -4,9 +4,9 @@ from app.agents.schema import PipelineResult, RunMetrics, TestPlan, VerifierResu
 def _result(ticket_id, provider, verdict, cost=0.01):
     return PipelineResult(
         ticket_id=ticket_id, provider=provider,
-        plan=TestPlan(ticket_id=ticket_id, matched=True, domain="sauce_demo", workflow="login", steps=["a"]),
+        plan=TestPlan(ticket_id=ticket_id, matched=True, domain="practice_software_testing", workflow="login", steps=["a"]),
         verification=VerifierResult(
-            ticket_id=ticket_id, domain="sauce_demo", workflow="login", verdict=verdict,
+            ticket_id=ticket_id, domain="practice_software_testing", workflow="login", verdict=verdict,
             assertion_checked={}, initial_check_passed=(verdict == "pass"), retried=False,
         ),
         metrics=RunMetrics(

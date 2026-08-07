@@ -1,0 +1,36 @@
+# practicesoftwaretesting.com ("Toolshop") - a demo hardware-store webshop
+# built specifically for QA automation practice. The login workflow uses
+# the site's own published demo customer account.
+name: practice_software_testing
+base_url: https://practicesoftwaretesting.com
+workflows:
+  - name: login
+    steps:
+      - Navigate to /auth/login
+      - Enter "customer@practicesoftwaretesting.com" into the Email field
+      - Enter "welcome01" into the Password field
+      - Click the Login button
+    expected_outcome:
+      url_contains: /account
+
+  - name: browse_and_add_to_cart
+    steps:
+      - Navigate to the homepage
+      - Search for "pliers" using the search bar
+      - Open the first matching product
+      - Add the product to the cart
+      - Open the cart
+    expected_outcome:
+      text_contains: Proceed to checkout
+
+  - name: contact_us
+    steps:
+      - Navigate to /contact
+      - Enter "Jordan" into the First Name field
+      - Enter "Lee" into the Last Name field
+      - Enter "jordan.lee@example.com" into the Email field
+      - Select "Warranty" from the Subject dropdown
+      - Enter "I have a question about my recent order." into the Message field
+      - Click the Send button
+    expected_outcome:
+      text_contains: Thanks for your message
