@@ -9,6 +9,7 @@ import {
   ListChecks,
   Rocket,
   RotateCcw,
+  ShieldCheck,
   Target,
 } from "lucide-react";
 import AskAboutTest from "../components/AskAboutTest";
@@ -33,13 +34,6 @@ import "./Dashboard.css";
 // Claude first, then Ollama - the order the combined report reads in:
 // each provider's full report, then the comparison beneath both.
 const PROVIDER_ORDER: Provider[] = ["claude", "ollama"];
-
-const AGENT_READY_ROW = [
-  { name: "Planner", color: "var(--claude-color)" },
-  { name: "Explorer", color: "var(--accent-blue)" },
-  { name: "Verifier", color: "var(--status-warning)" },
-  { name: "Reporter", color: "var(--accent)" },
-];
 
 const PROVIDER_LABELS: Record<string, string> = { claude: "Claude", ollama: "Llama (Ollama)" };
 
@@ -233,17 +227,14 @@ function Dashboard() {
           <span className="dash-hero-eyebrow">AI Command Center</span>
           <h1>Welcome back, {username ?? "Dua"}! 👋</h1>
           <p>
-            Your AI testing team is online and ready to analyze your next website. Enter a URL or connect a Trello
-            ticket to get started.
+            Your AI testing team is online and ready to analyze your next website. Connect a Trello ticket to get
+            started.
           </p>
         </div>
-        <div className="dash-hero-agent-row" aria-label="Agent readiness">
-          {AGENT_READY_ROW.map((agent) => (
-            <span className="dash-hero-agent-chip" key={agent.name}>
-              <span className="dash-hero-agent-dot" style={{ background: agent.color }} aria-hidden="true" />
-              {agent.name}
-            </span>
-          ))}
+        <div className="dash-hero-status" aria-label="System status">
+          <span className="dash-hero-status-pulse" aria-hidden="true" />
+          <ShieldCheck size={15} aria-hidden="true" />
+          <span>4 AI agents online</span>
         </div>
       </header>
 

@@ -535,3 +535,20 @@ Running log of significant AI prompts used to build this project, per the intern
 - New frontend test: a broken-input-probe frame gets `box-probe` (never `box-fail`), shows the "Testing invalid input" tag, and does not get the `live-browser-caption-fail` class the way a real failure does.
 - Full backend suite (211 tests, +5) passes; full frontend suite (32 tests, +1), `tsc --noEmit`, and `oxlint` all clean.
 - **Not yet completed:** only `text_contains` was made case-insensitive - if a workflow's assertion turns out to have a case-sensitivity problem in some other field or a different kind of mismatch (whitespace, punctuation), that's a separate bug to diagnose if/when it shows up on a real run.
+
+---
+
+## Dashboard hero: drop the agent-name chips, fix the "enter a URL" copy
+
+**Context:** The dashboard's welcome header showed four separate pill chips reading "Planner / Explorer / Verifier / Reporter" - internal agent names with no real meaning to someone using the tool, reading as clutter rather than a real status indicator. The welcome copy underneath also said "Enter a URL or connect a Trello ticket to get started," but the Start-a-new-test panel only ever had a Trello ticket ID field - there's no URL input anywhere on the dashboard, so that half of the sentence was simply untrue.
+
+**Prompt:** "remove these agent names from hre , else addd smth else , jo think would make it look more proffessional and nice / also if i can check url here then fine , otherwise remove 'add url' from welcome message" (with a screenshot of the four chips).
+
+**What was generated:**
+- `frontend/src/pages/Dashboard.tsx` - removed `AGENT_READY_ROW` and its four-chip row entirely. Replaced with a single `dash-hero-status` pill: a small pulsing green dot + a shield-check icon + "4 AI agents online" - one real status readout instead of four unexplained internal names, in the same visual language (pill, border, accent color) the page already uses elsewhere (`dash-hero-eyebrow`). Trimmed the welcome paragraph to "Connect a Trello ticket to get started," dropping the "Enter a URL or" clause since there genuinely is no URL field on this page.
+- `frontend/src/pages/Dashboard.css` - replaced `.dash-hero-agent-row`/`.dash-hero-agent-chip`/`.dash-hero-agent-dot` with `.dash-hero-status` (pill styling matching the eyebrow badge) and a `dash-hero-status-pulse` keyframe animation (mirrors the existing "LIVE" dot pulse pattern already used in `LiveBrowserView.css`), respecting `prefers-reduced-motion`.
+
+**What was checked/modified before accepting:**
+- Grepped for any other reference to the removed `AGENT_READY_ROW`/`dash-hero-agent-*` classes - none found, safe to delete outright rather than leave dead CSS.
+- `tsc --noEmit` clean, full frontend suite (32 tests) still passes, `oxlint` clean (only the two pre-existing unrelated warnings).
+- **Not yet completed:** purely a visual/copy change with no new interactive element - didn't add a URL-entry option since one doesn't exist on this page and wasn't asked for, just removed the inaccurate claim that it does.
