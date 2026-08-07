@@ -329,3 +329,18 @@ Running log of significant AI prompts used to build this project, per the intern
 - New `PipelineRunContext.test.tsx`: a consumer used outside the provider throws the expected error; two consumer trees mounted in sequence under the same still-alive provider (simulating navigating to a different page mid-run, via a `rerender` that swaps children under the identical provider instance) see the exact same live `status`, and only one `WebSocket` ever got opened - proving the connection is genuinely shared and survives what would previously have been a remount, not just that the code compiles.
 - Full backend suite (168 tests) and frontend suite (24 tests, +2) pass; `tsc --noEmit` and `oxlint` clean.
 - **Not yet completed:** same as before - no real Ollama instance or live browser session in this sandbox to confirm a genuinely slow local run now survives past 180s, or that navigating away and back mid-run behaves as expected against the real WebSocket (only a faithful fake was exercised in tests).
+
+---
+
+## Keeping Ollama warm between calls (keep_alive)
+
+**Context:** A real screenshot showed the exact 180s timeout message firing on the Explorer's very first action of a run - the model-load-time case the timeout was already sized to tolerate, not a genuinely stuck request. Raising the timeout (previous entry) stops that from failing the run, but doesn't make Ollama any faster; the actual fix for the underlying slowness is not paying the multi-minute model-load penalty repeatedly in the first place. Ollama's own default unloads a model from memory 5 minutes after its last call - so any gap between actions on a slow step, or between separate demo runs while explaining something to a mentor, was enough to force a full reload on the next call.
+
+**Prompt:** "whats the reason of this, i cant understand / also is there any way to fasten ollama, its so slow / my mentor said it would piss my panel board... can we pls fix it."
+
+**What was generated:** `backend/app/agents/ollama_client.py` now sends `"keep_alive": "30m"` on every `/api/generate` request (configurable via a new `OLLAMA_KEEP_ALIVE` env var, documented in `.env.example`) - tells Ollama to keep the model resident in memory for 30 minutes after each call instead of its 5-minute default, so a normal gap between actions or between tickets during a demo doesn't trigger a reload.
+
+**What was checked/modified before accepting:**
+- New Ollama client unit tests: `keep_alive` is sent with the documented default, and is overridable via `OLLAMA_KEEP_ALIVE`.
+- Full backend suite (170 tests, +2) passes.
+- **Not yet completed, and explained plainly in chat:** `keep_alive` only prevents *repeated* reloads - it can't make the very first call (a cold Ollama server, nothing loaded yet) faster, and it can't speed up per-token generation on slow CPU hardware. For that, the real levers are outside this codebase: pre-warm Ollama once before a demo (`ollama run llama3.1 "hi"`), confirm it's actually using a GPU if one exists (`ollama ps`), or switch `OLLAMA_MODEL` to a smaller/faster model (e.g. `llama3.2:3b`) at the cost of some decision accuracy - a real tradeoff for the user to weigh, not something to change unilaterally.
