@@ -8,7 +8,9 @@ which one actually ran - see pipeline.py's make_llm() for how the choice
 between the two is made.
 """
 
+import asyncio
 import os
+import re
 import time
 
 import httpx
@@ -24,6 +26,16 @@ DEFAULT_MODEL = "llama-3.1-8b-instant"
 # than CPU-only local inference, so a real stall here means something's
 # actually wrong (rate limit, outage), not "still thinking."
 REQUEST_TIMEOUT_SECONDS = 60.0
+# The free tier's tokens-per-minute budget is easy to blow through
+# precisely because Groq is so fast - the Explorer's many rapid per-action
+# calls used to be naturally paced out by local Ollama's own slowness, but
+# nothing paces them against Groq. A 429 always tells us how long to wait
+# (Retry-After header, or "try again in Xs" in the error body); retried a
+# couple of times with that wait instead of failing the whole exploration
+# outright the first time the per-minute budget is momentarily exceeded.
+MAX_RATE_LIMIT_RETRIES = 3
+_RETRY_AFTER_SECONDS_PATTERN = re.compile(r"try again in ([\d.]+)s", re.IGNORECASE)
+_DEFAULT_RATE_LIMIT_BACKOFF_SECONDS = 5.0
 
 
 class GroqLLMClient(LLMClient):
@@ -42,26 +54,48 @@ class GroqLLMClient(LLMClient):
             raise LLMError("GROQ_API_KEY is not set - required to use Groq as the Ollama backend.")
         self.model = model or os.environ.get("GROQ_MODEL", DEFAULT_MODEL)
 
+    @staticmethod
+    def _rate_limit_wait_seconds(response: httpx.Response) -> float:
+        header = response.headers.get("retry-after")
+        if header:
+            try:
+                return max(float(header), 0.0) + 0.5
+            except ValueError:
+                pass
+        match = _RETRY_AFTER_SECONDS_PATTERN.search(response.text)
+        if match:
+            return float(match.group(1)) + 0.5
+        return _DEFAULT_RATE_LIMIT_BACKOFF_SECONDS
+
     async def complete(self, prompt: str, *, max_tokens: int = 300, timeout: float | None = None) -> LLMResponse:
         request_timeout = timeout if timeout is not None else REQUEST_TIMEOUT_SECONDS
         started_at = time.time()
         started_monotonic = time.monotonic()
-        try:
-            async with httpx.AsyncClient(timeout=request_timeout) as client:
-                response = await client.post(
-                    API_URL,
-                    headers={"Authorization": f"Bearer {self._api_key}"},
-                    json={
-                        "model": self.model,
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": max_tokens,
-                        "response_format": {"type": "json_object"},
-                    },
-                )
-        except httpx.TimeoutException as exc:
-            raise LLMError(f"Groq didn't respond within {request_timeout:.0f}s. ({exc})") from exc
-        except httpx.RequestError as exc:
-            raise LLMError(f"Could not reach Groq - is GROQ_API_KEY valid and is there network access? ({exc})") from exc
+
+        for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+            try:
+                async with httpx.AsyncClient(timeout=request_timeout) as client:
+                    response = await client.post(
+                        API_URL,
+                        headers={"Authorization": f"Bearer {self._api_key}"},
+                        json={
+                            "model": self.model,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "max_tokens": max_tokens,
+                            "response_format": {"type": "json_object"},
+                        },
+                    )
+            except httpx.TimeoutException as exc:
+                raise LLMError(f"Groq didn't respond within {request_timeout:.0f}s. ({exc})") from exc
+            except httpx.RequestError as exc:
+                raise LLMError(
+                    f"Could not reach Groq - is GROQ_API_KEY valid and is there network access? ({exc})"
+                ) from exc
+
+            if response.status_code == 429 and attempt < MAX_RATE_LIMIT_RETRIES:
+                await asyncio.sleep(self._rate_limit_wait_seconds(response))
+                continue
+            break
 
         if response.status_code != 200:
             raise LLMError(f"Groq returned HTTP {response.status_code}: {response.text}")

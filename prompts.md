@@ -408,3 +408,19 @@ Running log of significant AI prompts used to build this project, per the intern
 - New test (`test_execute_step_completes_when_repeating_an_already_succeeded_action`) reproduces the exact real Toolshop failure - 3 identical successful fills queued, only the first is ever executed, the step completes cleanly rather than raising.
 - Full backend suite (184 tests, +1 net - one renamed/fixed, one new) passes.
 - **Not yet completed:** same as always with model-quality issues - this closes one specific recurring pattern (repeating an already-successful action) but doesn't make the model itself more reliable in general; a different kind of confusion could still surface on a different step shape. Worth another real run to confirm this exact failure is gone and watch for anything new.
+
+---
+
+## Groq's free-tier rate limit
+
+**Context:** After fixing the API-key setup and the already-succeeded loop-guard bug, a real run hit a third, different failure: `Groq returned HTTP 429: Rate limit reached for model llama-3.1-8b-instant... on tokens per minute (TPM): Limit 6000, Used 4757, Requested 3223.` This is a direct, almost funny consequence of the speed fix working: local Ollama was slow enough to naturally pace out the Explorer's rapid per-action calls, but Groq answers almost instantly, so a real run blows through the free tier's per-minute token budget in seconds. The client had no retry logic at all, so hitting this even once failed the whole step (and often the whole exploration) outright - even though Groq's own error message says exactly how long to wait (`try again in 19.8s`).
+
+**Prompt:** shown the report - "everytime its linke with ollama, im so done."
+
+**What was generated:** `backend/app/agents/groq_client.py`'s `complete()` now retries up to `MAX_RATE_LIMIT_RETRIES` (3) times on a 429, waiting however long Groq says to wait (parsed from the `Retry-After` header if present, else the "try again in Xs" text in the error body, plus a small buffer) before retrying - instead of failing on the very first rate-limit hit. Only 429s are retried; every other error (auth, malformed response, genuine timeout) still fails immediately as before.
+
+**What was checked/modified before accepting:**
+- New tests: a 429 followed by a successful retry completes normally and slept the parsed wait time; a persistently rate-limited run still eventually gives up cleanly after the retry budget (not an infinite retry loop against a genuinely exhausted quota); the wait-time parser is tested directly against both the header and the error-body-text cases, plus a sensible fallback when neither is parseable.
+- Fixed an existing test (`test_non_200_response_raises_llmerror`) that happened to use a 429 fixture - switched it to 500 so it still tests the generic non-200 path without accidentally exercising (and being slowed down by) the new retry logic.
+- Full backend suite (188 tests, +6 net) passes.
+- **Not yet completed:** can't verify against Groq's real rate limiter from this sandbox - the retry math (parsing "try again in Xs", waiting that long) is confirmed correct in isolation, but only a real run against a real exhausted quota confirms the whole exploration actually recovers smoothly instead of just failing slower. Also worth the user knowing this is a genuine free-tier ceiling, not a bug to fully eliminate - a workflow with a lot of steps in quick succession could still hit it more than 3 times in a row on a very busy account, at which point the run will fail with a clear rate-limit message rather than hang forever.
