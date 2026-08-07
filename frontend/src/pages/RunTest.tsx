@@ -1,18 +1,19 @@
 import { useState } from "react";
 import { AlertTriangle, Rocket, RotateCcw } from "lucide-react";
 import ComparisonSummary from "../components/ComparisonSummary";
+import LiveBrowserView from "../components/LiveBrowserView";
 import ModelSelector from "../components/ModelSelector";
 import PipelineTimeline from "../components/PipelineTimeline";
 import ReportCard from "../components/ReportCard";
 import TalkingAgentsPanel from "../components/TalkingAgentsPanel";
 import { usePipelineRun } from "../hooks/usePipelineRun";
-import type { ModelChoice } from "../types/pipeline";
+import type { ModelChoice, Provider } from "../types/pipeline";
 import "./RunTest.css";
 
 function RunTest() {
   const [ticketId, setTicketId] = useState("");
   const [model, setModel] = useState<ModelChoice>("claude");
-  const { status, feed, stages, results, comparison, errorMessage, start, reset } = usePipelineRun();
+  const { status, feed, stages, frames, frameHistory, results, comparison, errorMessage, start, reset } = usePipelineRun();
 
   const running = status === "connecting" || status === "running";
   const resultList = Object.values(results);
@@ -89,6 +90,19 @@ function RunTest() {
             <h2 className="run-test-section-title">Talking Agents</h2>
             <TalkingAgentsPanel feed={feed} showProvider={Object.keys(stages).length > 1} />
           </div>
+        </div>
+      )}
+
+      {Object.keys(stages).length > 0 && (
+        <div className="run-test-browsers">
+          {Object.keys(stages).map((p) => (
+            <LiveBrowserView
+              provider={p as Provider}
+              frame={frames[p as Provider]}
+              history={frameHistory[p as Provider] ?? []}
+              key={p}
+            />
+          ))}
         </div>
       )}
 

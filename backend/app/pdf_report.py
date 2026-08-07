@@ -6,6 +6,7 @@ reportlab (tables + a couple of bar charts, no external renderer needed).
 
 import io
 import json
+import os
 import time
 
 from reportlab.graphics.charts.barcharts import VerticalBarChart
@@ -14,16 +15,47 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from app.agents.claude_client import ClaudeLLMClient
 from app.agents.llm_client import LLMError
 from app.history.schema import HistoryDetail
 
-_PASS_COLOR = colors.HexColor("#0ca30c")
-_FAIL_COLOR = colors.HexColor("#d03b3b")
+_PASS_COLOR_HEX = "#0ca30c"
+_FAIL_COLOR_HEX = "#d03b3b"
+_PASS_COLOR = colors.HexColor(_PASS_COLOR_HEX)
+_FAIL_COLOR = colors.HexColor(_FAIL_COLOR_HEX)
 _ACCENT = colors.HexColor("#4a3aa7")
 _GRID = colors.HexColor("#cccccc")
+
+# Screenshots are served from main.py's /screenshots static mount, but the
+# PDF needs the real file on disk - this is that mount's target directory,
+# kept in sync with main.py's SCREENSHOTS_DIR by convention (both point at
+# the same gitignored reports/screenshots/ folder).
+_SCREENSHOTS_DIR = "reports/screenshots"
+_MAX_REPORT_SCREENSHOTS = 12
+_SCREENSHOT_WIDTH = 3.4 * inch
+
+
+def _screenshot_disk_path(screenshot_url: str | None) -> str | None:
+    if not screenshot_url or not screenshot_url.startswith("/screenshots/"):
+        return None
+    return os.path.join(_SCREENSHOTS_DIR, screenshot_url.removeprefix("/screenshots/"))
+
+
+def _sized_image(path: str, max_width: float) -> Image | None:
+    """A width-capped Image flowable at the screenshot's real aspect ratio -
+    reportlab's Image() otherwise renders at native pixel-as-point size,
+    which is far too large for a report page."""
+    try:
+        reader = ImageReader(path)
+        native_width, native_height = reader.getSize()
+        if not native_width:
+            return None
+        return Image(path, width=max_width, height=max_width * native_height / native_width)
+    except Exception:
+        return None
 
 
 def _fmt_ts(unix_ts: float) -> str:
@@ -218,6 +250,26 @@ def build_pdf(entry: HistoryDetail, narrative: dict) -> bytes:
             )
         )
         story.append(finding_table)
+
+    action_entries = (result.get("exploration") or {}).get("actions") or []
+    screenshotted = [a for a in action_entries if a.get("screenshot_path")][:_MAX_REPORT_SCREENSHOTS]
+    if screenshotted:
+        story.append(Paragraph("Action Screenshots", h2))
+        for a in screenshotted:
+            path = _screenshot_disk_path(a.get("screenshot_path"))
+            if not path or not os.path.isfile(path):
+                continue
+            image = _sized_image(path, _SCREENSHOT_WIDTH)
+            if image is None:
+                continue
+            caption = f"{a['step']} — {a['action']}"
+            if a.get("selector"):
+                caption += f" on {a['selector']}"
+            status = "PASS" if a.get("success") else f"FAIL ({a.get('error') or 'no detail'})"
+            status_color_hex = _PASS_COLOR_HEX if a.get("success") else _FAIL_COLOR_HEX
+            story.append(Paragraph(f'{caption} — <font color="{status_color_hex}">{status}</font>', body))
+            story.append(image)
+            story.append(Spacer(1, 10))
 
     doc.build(story)
     return buffer.getvalue()

@@ -25,6 +25,7 @@ class ActionLogEntry(BaseModel):
     success: bool
     error: str | None = None
     is_broken_input_attempt: bool = False
+    screenshot_path: str | None = None  # URL under /screenshots/, served by main.py's static mount
 
 
 class ExplorationResult(BaseModel):

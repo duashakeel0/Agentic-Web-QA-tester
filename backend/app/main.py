@@ -7,6 +7,7 @@ one final blob.
 """
 
 import json
+import os
 import sys
 
 if sys.platform == "win32":
@@ -23,6 +24,7 @@ if sys.platform == "win32":
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.agents.claude_client import ClaudeLLMClient
@@ -45,6 +47,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Live-run and report screenshots (explorer.py's per-action captures,
+# verifier.py's failure captures) - reports/ is gitignored, so a fresh
+# checkout won't have this directory yet; StaticFiles requires it to exist
+# up front.
+SCREENSHOTS_DIR = "reports/screenshots"
+os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+app.mount("/screenshots", StaticFiles(directory=SCREENSHOTS_DIR), name="screenshots")
 
 
 class LoginRequest(BaseModel):
@@ -150,8 +160,10 @@ VALID_MODELS = ("claude", "ollama", "both")
 async def run_pipeline_ws(websocket: WebSocket, token: str = Depends(require_auth_ws)) -> None:
     """Client sends {"ticket_id": "...", "model": "claude"|"ollama"|"both"}
     once, then receives a stream of stage_start/stage_end/stage_error events
-    as the pipeline runs, followed by one pipeline_done per provider and
-    (for "both") one comparison_done. Connect as /ws/pipeline?token=<token>
+    as the pipeline runs (plus one "action" event per Explorer browser
+    action - a screenshot_url/target_box/viewport for a live view), followed
+    by one pipeline_done per provider and (for "both") one comparison_done.
+    Connect as /ws/pipeline?token=<token>
     from login - the WebSocket API can't set an Authorization header."""
     await websocket.accept()
     try:

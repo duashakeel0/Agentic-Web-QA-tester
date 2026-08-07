@@ -1,12 +1,21 @@
 import pytest
 
+from app.agents import explorer as explorer_module
 from app.agents.explorer import ExplorerAgent, ExplorerError
 from app.agents.llm_client import LLMError
 from app.agents.schema import ActionLogEntry, TestPlan
 from tests.helpers import FakeLLM
 
 _SNAPSHOT_ELEMENTS = [
-    {"tag": "input", "type": "text", "id": "user-name", "name": None, "placeholder": "Username", "text": ""},
+    {
+        "tag": "input",
+        "type": "text",
+        "id": "user-name",
+        "name": None,
+        "placeholder": "Username",
+        "text": "",
+        "rect": {"x": 10, "y": 20, "width": 200, "height": 30},
+    },
 ]
 
 
@@ -16,6 +25,24 @@ class _FakeBrowser:
     clauses run, so it must exist even when unused."""
 
     page = object()
+
+
+class _FakePage:
+    def __init__(self):
+        self.viewport_size = {"width": 1280, "height": 720}
+        self.screenshot_calls = 0
+
+    async def screenshot(self):
+        self.screenshot_calls += 1
+        return b"fake-png-bytes"
+
+
+class _FakeBrowserWithScreenshot:
+    """Enough of BrowserSession's shape to exercise _emit_action's
+    screenshot capture without a real Playwright page."""
+
+    def __init__(self):
+        self.page = _FakePage()
 
 
 @pytest.fixture
@@ -112,6 +139,89 @@ def test_resolve_selector_leaves_real_css_selector_alone():
 def test_resolve_selector_leaves_unmatched_selector_alone():
     resolved = ExplorerAgent._resolve_selector("nonexistent", _SNAPSHOT_ELEMENTS)
     assert resolved == "nonexistent"
+
+
+async def test_emit_action_sends_screenshot_and_target_box(tmp_path, monkeypatch):
+    monkeypatch.setattr(explorer_module, "ACTION_SCREENSHOT_DIR", str(tmp_path))
+    events: list[dict] = []
+
+    async def on_action(event: dict) -> None:
+        events.append(event)
+
+    fake_browser = _FakeBrowserWithScreenshot()
+    agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM(), on_action=on_action)
+    agent._llm.queue('{"action": "fill", "selector": "user-name", "value": "bob", "reasoning": "fill it"}')
+    agent._llm.queue('{"action": "done", "selector": null, "value": null, "reasoning": "done"}')
+
+    async def _snapshot_with_elements():
+        return {"url": "http://x", "title": "t", "elements": _SNAPSHOT_ELEMENTS}
+
+    agent._snapshot = _snapshot_with_elements
+    agent._execute_action = _fake_action_success
+
+    actions: list[ActionLogEntry] = []
+    await agent._execute_step("Fill username", actions)
+
+    assert fake_browser.page.screenshot_calls == 1
+    assert len(events) == 1
+    event = events[0]
+    assert event["action"] == "fill"
+    assert event["selector"] == "#user-name"
+    assert event["success"] is True
+    assert event["screenshot_url"].startswith("/screenshots/actions/")
+    assert event["target_box"] == {"x": 10, "y": 20, "width": 200, "height": 30}
+    assert event["viewport"] == {"width": 1280, "height": 720}
+    assert actions[0].screenshot_path == event["screenshot_url"]
+
+
+async def test_emit_action_is_noop_without_listener(tmp_path, monkeypatch):
+    # explorer fixture's browser.page is a bare object() with no
+    # .screenshot() - if _emit_action didn't bail out immediately when
+    # there's no on_action listener, this would blow up with an
+    # AttributeError instead of just skipping quietly.
+    monkeypatch.setattr(explorer_module, "ACTION_SCREENSHOT_DIR", str(tmp_path))
+    fake_browser = _FakeBrowser()
+    agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM())
+    agent._llm.queue('{"action": "fill", "selector": "#user-name", "value": "bob", "reasoning": "fill it"}')
+    agent._llm.queue('{"action": "done", "selector": null, "value": null, "reasoning": "done"}')
+    agent._snapshot = _fake_snapshot
+    agent._execute_action = _fake_action_success
+
+    actions: list[ActionLogEntry] = []
+    await agent._execute_step("Fill username", actions)
+
+    assert actions[0].screenshot_path is None
+
+
+async def test_emit_action_failure_does_not_break_the_step(tmp_path, monkeypatch):
+    # A live-view/report side effect (screenshot capture, the on_action
+    # callback itself) must never fail the actual QA test it's reporting on.
+    monkeypatch.setattr(explorer_module, "ACTION_SCREENSHOT_DIR", str(tmp_path))
+
+    async def broken_on_action(event: dict) -> None:
+        raise RuntimeError("websocket send failed")
+
+    fake_browser = _FakeBrowserWithScreenshot()
+    agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM(), on_action=broken_on_action)
+    agent._llm.queue('{"action": "fill", "selector": "#user-name", "value": "bob", "reasoning": "fill it"}')
+    agent._llm.queue('{"action": "done", "selector": null, "value": null, "reasoning": "done"}')
+    agent._snapshot = _fake_snapshot
+    agent._execute_action = _fake_action_success
+
+    actions: list[ActionLogEntry] = []
+    await agent._execute_step("Fill username", actions)
+
+    assert actions[0].success is True
+    assert actions[0].screenshot_path is None
+
+
+def test_element_box_matches_resolved_selector():
+    box = ExplorerAgent._element_box("#user-name", _SNAPSHOT_ELEMENTS)
+    assert box == {"x": 10, "y": 20, "width": 200, "height": 30}
+
+
+def test_element_box_none_for_selectorless_action():
+    assert ExplorerAgent._element_box(None, _SNAPSHOT_ELEMENTS) is None
 
 
 async def test_execute_step_recovers_from_llm_error(explorer):

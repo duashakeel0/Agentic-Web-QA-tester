@@ -81,7 +81,7 @@ describe("ReportCard", () => {
     const user = userEvent.setup();
     const result = failingResult();
     result.exploration!.actions = [
-      { step: "Log in", action: "click", selector: "#login-button", value: null, reasoning: null, success: false, error: "boom", is_broken_input_attempt: false },
+      { step: "Log in", action: "click", selector: "#login-button", value: null, reasoning: null, success: false, error: "boom", is_broken_input_attempt: false, screenshot_path: null },
     ];
 
     render(<ReportCard result={result} />);

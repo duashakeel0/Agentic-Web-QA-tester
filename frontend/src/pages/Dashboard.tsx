@@ -16,6 +16,7 @@ import BarList from "../components/charts/BarList";
 import DonutChart from "../components/charts/DonutChart";
 import LineChart from "../components/charts/LineChart";
 import ProgressRing from "../components/charts/ProgressRing";
+import LiveBrowserView from "../components/LiveBrowserView";
 import ModelSelector from "../components/ModelSelector";
 import PipelineTimeline from "../components/PipelineTimeline";
 import ReportCard from "../components/ReportCard";
@@ -24,7 +25,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { usePipelineRun, type RunStatus } from "../hooks/usePipelineRun";
 import { apiGet, ApiError } from "../services/api";
 import type { DailyStat, HistoryEntry, HistoryStats, ProviderStats } from "../types/history";
-import type { ModelChoice } from "../types/pipeline";
+import type { ModelChoice, Provider } from "../types/pipeline";
 import "./Dashboard.css";
 
 const AGENT_READY_ROW = [
@@ -88,7 +89,8 @@ function Dashboard() {
   const { username, logout } = useAuth();
   const [ticketId, setTicketId] = useState("");
   const [model, setModel] = useState<ModelChoice>("claude");
-  const { status, feed, stages, results, historyIds, comparison, errorMessage, start, reset } = usePipelineRun();
+  const { status, feed, stages, frames, frameHistory, results, historyIds, comparison, errorMessage, start, reset } =
+    usePipelineRun();
   const { toasts, dismiss } = useRunToasts(status, errorMessage, ticketId);
 
   const [stats, setStats] = useState<HistoryStats | null>(null);
@@ -329,6 +331,17 @@ function Dashboard() {
                   {status === "running" && <ProgressRing percent={progressPercent} label="In Progress" />}
                 </div>
                 <TalkingAgentsPanel feed={feed} showProvider={Object.keys(stages).length > 1} />
+              </div>
+
+              <div className="dash-live-browsers">
+                {activeProviders.map((p) => (
+                  <LiveBrowserView
+                    provider={p as Provider}
+                    frame={frames[p as Provider]}
+                    history={frameHistory[p as Provider] ?? []}
+                    key={p}
+                  />
+                ))}
               </div>
             </section>
           )}

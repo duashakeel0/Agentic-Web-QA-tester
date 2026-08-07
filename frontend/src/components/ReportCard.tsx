@@ -13,6 +13,7 @@ import {
   Ticket,
   XCircle,
 } from "lucide-react";
+import { API_BASE_URL } from "../config";
 import { downloadFile } from "../services/api";
 import type { PipelineResult, Provider } from "../types/pipeline";
 import "./ReportCard.css";
@@ -166,10 +167,19 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
             <ul className="report-actions-list">
               {exploration.actions.map((action, i) => (
                 <li key={i} className={action.success ? "action-success" : "action-fail"}>
-                  <span className="action-step">{action.step}</span>: {action.action}
-                  {action.selector ? ` on ${action.selector}` : ""}
-                  {action.value ? ` with ${JSON.stringify(action.value)}` : ""}
-                  {!action.success && action.error ? ` — ${action.error}` : ""}
+                  {action.screenshot_path && (
+                    <img
+                      className="action-thumb"
+                      src={`${API_BASE_URL}${action.screenshot_path}`}
+                      alt={`${action.action} on ${action.step}`}
+                    />
+                  )}
+                  <span className="action-text">
+                    <span className="action-step">{action.step}</span>: {action.action}
+                    {action.selector ? ` on ${action.selector}` : ""}
+                    {action.value ? ` with ${JSON.stringify(action.value)}` : ""}
+                    {!action.success && action.error ? ` — ${action.error}` : ""}
+                  </span>
                 </li>
               ))}
             </ul>

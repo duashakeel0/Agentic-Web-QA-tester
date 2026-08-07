@@ -167,7 +167,10 @@ async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | 
             total_duration_ms=(finished_at - started_at) * 1000,
         )
 
-    explorer = ExplorerAgent(llm=llm)
+    async def on_action(event: dict) -> None:
+        await _emit(on_event, {"type": "action", "provider": provider, "agent": "explorer", **event})
+
+    explorer = ExplorerAgent(llm=llm, on_action=on_action)
     exploration = await timed("explorer", explorer.explore(plan, close_browser=False))
 
     verifier = VerifierAgent(llm=llm)

@@ -22,6 +22,7 @@ export interface ActionLogEntry {
   success: boolean;
   error: string | null;
   is_broken_input_attempt: boolean;
+  screenshot_path: string | null;
 }
 
 export interface ExplorationResult {
@@ -128,10 +129,36 @@ export interface ComparisonReport {
   summary: string;
 }
 
+export interface TargetBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface Viewport {
+  width: number;
+  height: number;
+}
+
 export type PipelineEvent =
   | { type: "stage_start"; provider: Provider; agent: AgentName }
   | { type: "stage_end"; provider: Provider; agent: AgentName; duration_ms: number; message: string }
   | { type: "stage_error"; provider: Provider; agent: AgentName; message: string }
+  | {
+      type: "action";
+      provider: Provider;
+      agent: AgentName;
+      step: string;
+      action: string;
+      selector: string | null;
+      value: string | null;
+      success: boolean;
+      error: string | null;
+      screenshot_url: string | null;
+      target_box: TargetBox | null;
+      viewport: Viewport | null;
+    }
   | { type: "pipeline_done"; provider: Provider; history_id: number; result: PipelineResult }
   | { type: "comparison_done"; comparison_group: string; comparison: ComparisonReport }
   | { type: "error"; provider?: Provider; message: string };

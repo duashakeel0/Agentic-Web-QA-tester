@@ -34,8 +34,9 @@ class _FakePlannerUnmatched:
 
 
 class _FakeExplorer:
-    def __init__(self, llm=None):
+    def __init__(self, llm=None, on_action=None):
         self.llm = llm
+        self.on_action = on_action
         self.browser = _FakeBrowser()
 
     async def explore(self, plan, close_browser=True):
@@ -146,7 +147,7 @@ async def test_run_pipeline_emits_events_in_order():
 
 async def test_run_pipeline_emits_stage_error_and_reraises(monkeypatch):
     class _BrokenExplorer:
-        def __init__(self, llm=None):
+        def __init__(self, llm=None, on_action=None):
             self.browser = _FakeBrowser()
 
         async def explore(self, plan, close_browser=True):

@@ -465,6 +465,13 @@
   gap: var(--space-6);
 }
 
+.dash-live-browsers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-6);
+  margin-top: var(--space-5);
+}
+
 .dash-report-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));

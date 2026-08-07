@@ -1,6 +1,15 @@
 import { useCallback, useRef, useState } from "react";
 import { getPipelineSocketUrl } from "../services/api";
-import type { AgentName, ComparisonReport, ModelChoice, PipelineEvent, PipelineResult, Provider } from "../types/pipeline";
+import type {
+  AgentName,
+  ComparisonReport,
+  ModelChoice,
+  PipelineEvent,
+  PipelineResult,
+  Provider,
+  TargetBox,
+  Viewport,
+} from "../types/pipeline";
 
 const AGENTS: AgentName[] = ["planner", "explorer", "verifier", "reporter"];
 
@@ -28,6 +37,23 @@ export interface FeedMessage {
 
 export type RunStatus = "idle" | "connecting" | "running" | "done" | "error";
 
+export interface ActionFrame {
+  step: string;
+  action: string;
+  selector: string | null;
+  value: string | null;
+  success: boolean;
+  error: string | null;
+  screenshotUrl: string | null;
+  targetBox: TargetBox | null;
+  viewport: Viewport | null;
+  timestamp: number;
+}
+
+// Bounds how many recent frames a filmstrip keeps per provider - a live
+// view, not a full recording, so only the tail end matters.
+const MAX_FRAME_HISTORY = 10;
+
 function freshStageMap(): StageMap {
   return {
     planner: { status: "pending" },
@@ -48,6 +74,8 @@ export function usePipelineRun() {
   const [status, setStatus] = useState<RunStatus>("idle");
   const [feed, setFeed] = useState<FeedMessage[]>([]);
   const [stages, setStages] = useState<Partial<Record<Provider, StageMap>>>({});
+  const [frames, setFrames] = useState<Partial<Record<Provider, ActionFrame>>>({});
+  const [frameHistory, setFrameHistory] = useState<Partial<Record<Provider, ActionFrame[]>>>({});
   const [results, setResults] = useState<Partial<Record<Provider, PipelineResult>>>({});
   const [historyIds, setHistoryIds] = useState<Partial<Record<Provider, number>>>({});
   const [comparison, setComparison] = useState<ComparisonReport | null>(null);
@@ -60,6 +88,8 @@ export function usePipelineRun() {
     setStatus("idle");
     setFeed([]);
     setStages({});
+    setFrames({});
+    setFrameHistory({});
     setResults({});
     setHistoryIds({});
     setComparison(null);
@@ -75,6 +105,8 @@ export function usePipelineRun() {
     (ticketId: string, model: ModelChoice) => {
       setStatus("connecting");
       setFeed([]);
+      setFrames({});
+      setFrameHistory({});
       setResults({});
       setHistoryIds({});
       setComparison(null);
@@ -121,6 +153,24 @@ export function usePipelineRun() {
             },
           }));
           pushFeedMessage(data.provider, data.agent, "error", data.message);
+        } else if (data.type === "action") {
+          const frame: ActionFrame = {
+            step: data.step,
+            action: data.action,
+            selector: data.selector,
+            value: data.value,
+            success: data.success,
+            error: data.error,
+            screenshotUrl: data.screenshot_url,
+            targetBox: data.target_box,
+            viewport: data.viewport,
+            timestamp: Date.now(),
+          };
+          setFrames((prev) => ({ ...prev, [data.provider]: frame }));
+          setFrameHistory((prev) => {
+            const existing = prev[data.provider] ?? [];
+            return { ...prev, [data.provider]: [...existing, frame].slice(-MAX_FRAME_HISTORY) };
+          });
         } else if (data.type === "pipeline_done") {
           setResults((prev) => ({ ...prev, [data.provider]: data.result }));
           setHistoryIds((prev) => ({ ...prev, [data.provider]: data.history_id }));
@@ -145,5 +195,5 @@ export function usePipelineRun() {
     [pushFeedMessage],
   );
 
-  return { status, feed, stages, results, historyIds, comparison, errorMessage, start, reset, AGENTS };
+  return { status, feed, stages, frames, frameHistory, results, historyIds, comparison, errorMessage, start, reset, AGENTS };
 }

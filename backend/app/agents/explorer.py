@@ -13,6 +13,10 @@ catch it well before it does real damage.
 """
 
 import json
+import logging
+import os
+import re
+from collections.abc import Awaitable, Callable
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -22,6 +26,19 @@ from app.agents.llm_client import LLMClient, LLMError
 from app.agents.schema import ActionLogEntry, ExplorationResult, TestPlan
 from app.browser import BrowserSession
 from app.domains.manifest import load_domains
+
+logger = logging.getLogger(__name__)
+
+# Called with one dict per browser action (live view + report material) -
+# never allowed to affect whether exploration itself succeeds or fails,
+# see _emit_action.
+ActionCallback = Callable[[dict], Awaitable[None]]
+
+# Screenshots served straight off disk by main.py's /screenshots static
+# mount - kept separate from verifier.py's SCREENSHOT_DIR (one overwritten
+# failure shot per run) since this is one file per action, per run.
+ACTION_SCREENSHOT_DIR = "reports/screenshots/actions"
+_UNSAFE_FILENAME_CHARS = re.compile(r"[^a-zA-Z0-9_-]+")
 
 MAX_ACTIONS_PER_STEP = 6
 MAX_IDENTICAL_ACTION_REPEATS = 2
@@ -46,15 +63,26 @@ _CSS_SELECTOR_PREFIX_CHARS = ("#", ".", "[", "*", ">", "~", "+", ":")
 _SNAPSHOT_JS = """
 () => Array.from(document.querySelectorAll(
   'input, textarea, select, button, a[href], [role="button"]'
-)).slice(0, 25).map((el) => ({
-  tag: el.tagName.toLowerCase(),
-  type: el.getAttribute('type'),
-  id: el.id || null,
-  name: el.getAttribute('name'),
-  placeholder: el.getAttribute('placeholder'),
-  text: (el.innerText || el.value || '').trim().slice(0, 60),
-}))
+)).slice(0, 25).map((el) => {
+  const r = el.getBoundingClientRect();
+  return {
+    tag: el.tagName.toLowerCase(),
+    type: el.getAttribute('type'),
+    id: el.id || null,
+    name: el.getAttribute('name'),
+    placeholder: el.getAttribute('placeholder'),
+    text: (el.innerText || el.value || '').trim().slice(0, 60),
+    // Viewport-relative, matching a non-full-page page.screenshot() 1:1 -
+    // what lets the live view draw a box over exactly the element a
+    // decision acted on.
+    rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+  };
+})
 """
+
+
+def _safe_filename(raw: str) -> str:
+    return _UNSAFE_FILENAME_CHARS.sub("_", raw)[:120]
 
 
 class ExplorerError(Exception):
@@ -64,9 +92,17 @@ class ExplorerError(Exception):
 
 
 class ExplorerAgent:
-    def __init__(self, browser: BrowserSession | None = None, llm: LLMClient | None = None) -> None:
+    def __init__(
+        self,
+        browser: BrowserSession | None = None,
+        llm: LLMClient | None = None,
+        on_action: ActionCallback | None = None,
+    ) -> None:
         self._browser = browser or BrowserSession()
         self._llm = llm or ClaudeLLMClient()
+        self._on_action = on_action
+        self._action_index = 0
+        self._run_key = "run"
 
     @property
     def browser(self) -> BrowserSession:
@@ -87,6 +123,11 @@ class ExplorerAgent:
         actions: list[ActionLogEntry] = []
         broken_input_done = False
         completed_ok = False
+        self._action_index = 0
+        # Namespaces screenshot filenames so a concurrent "compare both" run
+        # (same ticket/domain/workflow, two providers at once) never has one
+        # provider's screenshots overwrite the other's.
+        self._run_key = _safe_filename(f"{plan.ticket_id}_{plan.domain}_{plan.workflow}_{self._llm.provider}")
 
         await self._browser.start()
         try:
@@ -94,6 +135,9 @@ class ExplorerAgent:
             # waits on "domcontentloaded" instead of "load", which is what
             # makes real-world sites that never cleanly fire "load" work.
             await self._browser.goto(domain.base_url)
+            await self._emit_action(
+                step="(start)", action="page_loaded", selector=None, value=domain.base_url, success=True, error=None
+            )
 
             for step in plan.steps:
                 if not broken_input_done and self._is_interactive_step(step):
@@ -163,6 +207,70 @@ class ExplorerAgent:
                 return f'[name="{candidate}"]'
         return selector
 
+    @staticmethod
+    def _element_box(selector: str | None, elements: list[dict]) -> dict | None:
+        """The bounding box of whichever snapshot element a (possibly
+        already-resolved) selector points at - what a live view draws its
+        highlight box from. None for a selector-less action (navigate,
+        page-load) or one that doesn't match anything in the snapshot."""
+        if not selector:
+            return None
+        for element in elements:
+            el_id, el_name = element.get("id"), element.get("name")
+            if selector == (f"#{el_id}" if el_id else None) or selector == (f'[name="{el_name}"]' if el_name else None):
+                return element.get("rect")
+        return None
+
+    async def _emit_action(
+        self,
+        *,
+        step: str,
+        action: str,
+        selector: str | None,
+        value: str | None,
+        success: bool,
+        error: str | None,
+        elements: list[dict] | None = None,
+    ) -> str | None:
+        """Best-effort live-view/report material for one action: a
+        screenshot saved to disk (served by main.py's /screenshots mount,
+        and what the PDF report + ReportCard embed later, via the returned
+        URL) plus a bounding box for whatever element the action targeted.
+        Wrapped in one broad try/except on purpose - a screenshot failure
+        (page mid-navigation, browser closing, disk full) must never fail
+        the actual QA test, which is the entire point of this being a side
+        channel and not part of the real action-execution path above.
+        Returns the screenshot's URL (for ActionLogEntry.screenshot_path),
+        or None if there's no on_action listener or capture failed."""
+        if self._on_action is None:
+            return None
+        try:
+            screenshot_bytes = await self._browser.page.screenshot()
+            self._action_index += 1
+            filename = f"{self._run_key}_{self._action_index:03d}.png"
+            os.makedirs(ACTION_SCREENSHOT_DIR, exist_ok=True)
+            with open(os.path.join(ACTION_SCREENSHOT_DIR, filename), "wb") as f:
+                f.write(screenshot_bytes)
+            screenshot_url = f"/screenshots/actions/{filename}"
+            viewport = self._browser.page.viewport_size
+            await self._on_action(
+                {
+                    "step": step,
+                    "action": action,
+                    "selector": selector,
+                    "value": value,
+                    "success": success,
+                    "error": error,
+                    "screenshot_url": screenshot_url,
+                    "target_box": self._element_box(selector, elements or []),
+                    "viewport": viewport,
+                }
+            )
+            return screenshot_url
+        except Exception:
+            logger.exception("Failed to capture/emit a live action frame - continuing without it.")
+            return None
+
     async def _execute_action(self, action: str, selector: str | None, value: str | None) -> tuple[bool, str | None]:
         page = self._browser.page
         # A model call can succeed but still omit a field the action actually
@@ -209,7 +317,12 @@ class ExplorerAgent:
                 # exploration - recorded as a failed "attempt" like any other
                 # so it counts against the step's action budget and the next
                 # loop iteration gets a fresh chance instead of crashing out.
-                entry = ActionLogEntry(step=step, action="unknown", success=False, error=str(exc))
+                screenshot_url = await self._emit_action(
+                    step=step, action="unknown", selector=None, value=None, success=False, error=str(exc)
+                )
+                entry = ActionLogEntry(
+                    step=step, action="unknown", success=False, error=str(exc), screenshot_path=screenshot_url
+                )
                 actions.append(entry)
                 step_actions.append(entry)
                 continue
@@ -241,6 +354,15 @@ class ExplorerAgent:
                 )
 
             success, error = await self._execute_action(action, selector, value)
+            screenshot_url = await self._emit_action(
+                step=step,
+                action=action,
+                selector=selector,
+                value=value,
+                success=success,
+                error=error,
+                elements=snapshot["elements"],
+            )
             entry = ActionLogEntry(
                 step=step,
                 action=action,
@@ -249,6 +371,7 @@ class ExplorerAgent:
                 reasoning=decision.get("reasoning"),
                 success=success,
                 error=error,
+                screenshot_path=screenshot_url,
             )
             actions.append(entry)
             step_actions.append(entry)
@@ -277,6 +400,15 @@ class ExplorerAgent:
         selector = self._resolve_selector(decision.get("selector"), snapshot["elements"])
         value = decision.get("value")
         success, error = await self._execute_action(action, selector, value)
+        screenshot_url = await self._emit_action(
+            step=step,
+            action=action,
+            selector=selector,
+            value=value,
+            success=success,
+            error=error,
+            elements=snapshot["elements"],
+        )
         actions.append(
             ActionLogEntry(
                 step=step,
@@ -287,6 +419,7 @@ class ExplorerAgent:
                 success=success,
                 error=error,
                 is_broken_input_attempt=True,
+                screenshot_path=screenshot_url,
             )
         )
 
