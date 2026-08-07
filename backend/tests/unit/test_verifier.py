@@ -112,3 +112,22 @@ def test_check_assertion_requires_all_present_fields():
     assert check({"text_contains": "Products"}, "https://site", "Products page") is True
     assert check({"text_contains": "Products"}, "https://site", "Nope") is False
     assert check({}, None, None) is True
+
+
+def test_check_assertion_text_contains_is_case_insensitive():
+    # Reproduces a real Toolshop false FAIL: the YAML's expected_outcome
+    # writes "No results" (capital N), but the real page's text reads
+    # "...there are no results." (lowercase, mid-sentence) - the assertion
+    # is clearly satisfied and shouldn't fail a run over capitalization.
+    check = VerifierAgent._check_assertion
+    assert check({"text_contains": "No results"}, "https://site", "There are no results.") is True
+    assert check({"text_contains": "no results"}, "https://site", "THERE ARE NO RESULTS.") is True
+    assert check({"text_contains": "No results"}, "https://site", "Everything matched fine") is False
+
+
+def test_check_assertion_url_contains_stays_case_sensitive():
+    # Unlike text_contains, a URL's exact casing can be meaningful (path
+    # segments, slugs) - only the human-readable text assertion should be
+    # forgiving of capitalization.
+    check = VerifierAgent._check_assertion
+    assert check({"url_contains": "/Inventory"}, "https://site/inventory", "text") is False

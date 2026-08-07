@@ -126,7 +126,12 @@ class VerifierAgent:
         text_contains = expected.get("text_contains")
         if url_contains and (not url or url_contains not in url):
             return False
-        if text_contains and (not text or text_contains not in text):
+        # Case-insensitive on purpose: a real page's exact capitalization
+        # ("There are no results.") often doesn't match a hand-written
+        # expected_outcome's casing ("No results") even though the
+        # assertion is clearly satisfied - text_contains is checking that
+        # a message appears, not testing capitalization as the bug itself.
+        if text_contains and (not text or text_contains.lower() not in text.lower()):
             return False
         return True
 

@@ -304,6 +304,7 @@ class ExplorerAgent:
         value: str | None,
         success: bool,
         error: str | None,
+        is_broken_input_attempt: bool = False,
     ) -> str | None:
         """Best-effort live-view/report material for one action: a
         screenshot saved to disk (served by main.py's /screenshots mount,
@@ -338,6 +339,7 @@ class ExplorerAgent:
                     "screenshot_url": screenshot_url,
                     "target_box": await self._element_box(selector),
                     "viewport": viewport,
+                    "is_broken_input_attempt": is_broken_input_attempt,
                 }
             )
             return screenshot_url
@@ -568,6 +570,7 @@ class ExplorerAgent:
             value=value,
             success=success,
             error=error,
+            is_broken_input_attempt=True,
         )
         actions.append(
             ActionLogEntry(

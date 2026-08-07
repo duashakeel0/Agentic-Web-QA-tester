@@ -164,6 +164,10 @@ export type PipelineEvent =
       screenshot_url: string | null;
       target_box: TargetBox | null;
       viewport: Viewport | null;
+      // A deliberate "try invalid input first" probe, run once per
+      // workflow before the real attempt - expected to fail, so it's
+      // never a genuine red flag the way a real failed action is.
+      is_broken_input_attempt: boolean;
     }
   | {
       // A background live-view tick on a fixed interval, independent of

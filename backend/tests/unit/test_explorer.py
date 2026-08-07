@@ -340,6 +340,36 @@ async def test_emit_action_sends_screenshot_and_target_box(tmp_path, monkeypatch
     assert event["target_box"] == {"x": 10, "y": 20, "width": 200, "height": 30}
     assert event["viewport"] == {"width": 1280, "height": 720}
     assert actions[0].screenshot_path == event["screenshot_url"]
+    # A normal action must never be mistaken for a deliberate broken-input
+    # probe downstream - the live view would wrongly show it as a neutral
+    # "testing invalid input" tag instead of a real pass/fail.
+    assert event["is_broken_input_attempt"] is False
+
+
+async def test_attempt_broken_input_emits_live_event_flagged_as_probe(tmp_path, monkeypatch):
+    # The live-view fix for the false-alarm-red-fail bug: a deliberate
+    # broken-input probe (expected to fail/be rejected) must carry
+    # is_broken_input_attempt=True all the way into the emitted live event,
+    # not just onto the persisted ActionLogEntry - otherwise the frontend
+    # has no way to tell it apart from a genuine failed action.
+    monkeypatch.setattr(explorer_module, "ACTION_SCREENSHOT_DIR", str(tmp_path))
+    events: list[dict] = []
+
+    async def on_action(event: dict) -> None:
+        events.append(event)
+
+    fake_browser = _FakeBrowserWithScreenshot()
+    agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM(), on_action=on_action)
+    agent._llm.queue('{"action": "fill", "selector": "#search", "value": "", "reasoning": "try empty input"}')
+    agent._snapshot = _fake_snapshot
+    agent._execute_action = _fake_action_failure
+
+    actions: list[ActionLogEntry] = []
+    await agent._attempt_broken_input("Fill username", actions)
+
+    assert len(events) == 1
+    assert events[0]["is_broken_input_attempt"] is True
+    assert actions[0].is_broken_input_attempt is True
 
 
 async def test_emit_action_is_noop_without_listener(tmp_path, monkeypatch):

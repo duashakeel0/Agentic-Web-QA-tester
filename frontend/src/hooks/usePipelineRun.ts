@@ -48,6 +48,7 @@ export interface ActionFrame {
   targetBox: TargetBox | null;
   viewport: Viewport | null;
   timestamp: number;
+  isBrokenInputAttempt: boolean;
 }
 
 // Bounds how many recent frames a filmstrip keeps per provider - a live
@@ -165,6 +166,7 @@ export function usePipelineRun() {
             targetBox: data.target_box,
             viewport: data.viewport,
             timestamp: Date.now(),
+            isBrokenInputAttempt: data.is_broken_input_attempt,
           };
           setFrames((prev) => ({ ...prev, [data.provider]: frame }));
           setFrameHistory((prev) => {
@@ -192,6 +194,7 @@ export function usePipelineRun() {
                   targetBox: null,
                   viewport: data.viewport,
                   timestamp: Date.now(),
+                  isBrokenInputAttempt: false,
                 };
             return { ...prev, [data.provider]: next };
           });
