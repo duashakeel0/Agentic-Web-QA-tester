@@ -34,11 +34,18 @@ function LoginPage() {
 
   return (
     <div className="login-page app-shell-full-bleed">
+      <div className="login-glow" aria-hidden="true" />
       <div className="login-card">
-        <span className="login-eyebrow">
-          <ShieldCheck size={13} aria-hidden="true" />
-          SentinelQA
-        </span>
+        <div className="login-brand">
+          <span className="login-brand-icon">
+            <ShieldCheck size={22} aria-hidden="true" />
+          </span>
+          <div>
+            <div className="login-brand-name">SentinelQA</div>
+            <div className="login-brand-tagline">AI QA Agent</div>
+          </div>
+        </div>
+
         <h1 className="login-greeting">Welcome back.</h1>
         <p className="login-subtitle">Sign in to run your AI QA agents and see your latest reports.</p>
 

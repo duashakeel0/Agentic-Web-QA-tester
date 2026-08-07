@@ -1,41 +1,69 @@
 .login-page {
+  position: relative;
   width: 100%;
   min-height: 100svh;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 1.5rem;
+  overflow: hidden;
+}
+
+.login-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(480px circle at 20% 15%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 60%),
+    radial-gradient(420px circle at 85% 85%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 60%);
 }
 
 .login-card {
+  position: relative;
   width: 100%;
   max-width: 380px;
   background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 16px;
-  box-shadow: var(--shadow);
+  border-radius: 18px;
+  box-shadow: var(--shadow), 0 0 0 1px color-mix(in srgb, var(--accent) 8%, transparent);
   padding: 2.5rem 2rem;
   text-align: left;
 }
 
-.login-eyebrow {
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 1.75rem;
+}
+
+.login-brand-icon {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12.5px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 11px;
   color: var(--accent);
   background: var(--accent-bg);
   border: 1px solid var(--accent-border);
-  border-radius: var(--radius-pill);
-  padding: 4px 12px;
-  margin-bottom: 1.25rem;
+}
+
+.login-brand-name {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: var(--text-h);
+  line-height: 1.3;
+}
+
+.login-brand-tagline {
+  font-size: 11.5px;
+  color: var(--text);
 }
 
 .login-greeting {
-  font-size: 32px;
+  font-size: 30px;
   margin: 0 0 0.4rem;
 }
 
