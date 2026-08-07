@@ -266,3 +266,22 @@ Running log of significant AI prompts used to build this project, per the intern
 - Left CampusHub's YAML untouched - couldn't find a CampusHub repo on the connected GitHub account to read its actual routes/features from (only the empty Vite-scaffold `-arbisoft-internship` repo exists there), so didn't invent workflows for functionality that might not exist
 - Full backend suite (163 tests) and frontend suite (18 tests) pass; `tsc`/`oxlint` clean
 - **Not yet completed:** same caveat as the earlier domain swap - the new ParaBank/Toolshop/AutomationExercise workflows are sourced from web search against each site's own docs, not a live page load (this sandbox's egress is locked to an allowlist), so still needs a real local run to confirm before relying on them for the presentation
+
+---
+
+## CampusHub verification + expanded coverage
+
+**Context:** The previous round's entry above flagged that CampusHub's YAML was left untouched because no CampusHub repo could be located to verify against - only an empty Vite scaffold was visible at the time. CampusHub's actual source turned out to live on the `week5-mcp-multiagent` branch of `duashakeel0/-arbisoft-internship`, not on its default branch, which is why it wasn't found earlier.
+
+**Prompt:** Find CampusHub's real source and use it to confirm the existing `campushub.yaml` workflows are accurate, then fill it out with more workflows the same way the other three domains were expanded.
+
+**What was generated:**
+- Read the real CampusHub frontend source directly (`src/routes/AppRoutes.tsx`, `src/pages/Login.tsx`, `Dashboard.tsx`, `MarkAttendance.tsx`, `Students.tsx`, `Register.tsx`, `src/components/AttendanceForm.tsx`, and the relevant TanStack Query hooks) and the Django models/routes backing it, all read-only - no changes were made to the CampusHub repo itself.
+- Confirmed the 3 pre-existing workflows (`student_login`, `mark_attendance`, `view_own_records`) were already 100% accurate against real source - their assertions (`Welcome to CampusHub`, `Attendance marked successfully!`, `Attendance Records`) match the live component text exactly.
+- Added `view_students` (login → `/students` → assert `Manage student records here.`), `edit_attendance_record` (create a record, click Edit, change status, resubmit → assert the confirmed toast `Attendance record updated!`), `delete_attendance_record` (create then delete a record → assert the confirmed toast `Attendance record deleted.`), and `login_invalid_credentials` (wrong username/password → assert `Login failed`).
+- Deliberately did not add an "add student" or "register new account" workflow, for the same reason registration is excluded from `automation_exercise.yaml`: `Student.student_id` and `User.username` are both `unique=True`/unique in the Django models, so a fixed value only succeeds on the first run.
+
+**What was checked/modified before accepting:**
+- Every new assertion is a literal string read directly from CampusHub's source (toast text from the mutation hooks, heading/paragraph text from the page components) - not guessed or inferred, unlike the earlier ParaBank/Toolshop/AutomationExercise round which relied on web search.
+- `load_domains()` loads the updated YAML with no schema errors.
+- Full backend suite (163 tests) and frontend suite (18 tests) still pass - no code changes were needed outside the YAML itself.
