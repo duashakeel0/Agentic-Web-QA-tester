@@ -357,3 +357,19 @@ Running log of significant AI prompts used to build this project, per the intern
 - No test asserted the specific default model string, so nothing needed updating beyond the constant/env template themselves.
 - Full backend suite (170 tests) still passes.
 - **Not yet completed, and told plainly to the user:** this only takes effect once they run `ollama pull llama3.2` and either remove `OLLAMA_MODEL` from their real local `.env` (not the tracked `.env.example`) or set it to `llama3.2` explicitly - their `ollama ps` output showed llama3.1 already loaded from an existing local `.env`/prior pull, which this code change can't reach or edit. Also genuinely can't verify from this sandbox that 3B is meaningfully faster on their exact hardware or still accurate enough for the harder workflows (ParaBank's multi-field forms especially) - worth a real comparison run before relying on it for the actual presentation.
+
+---
+
+## Skipping a redundant first-step LLM call (llama3.2 hallucinated selector)
+
+**Context:** A real screenshot after switching to llama3.2 showed a new, different failure than the timeout ones - `click on #home` failing with `Timed out waiting for '#home'`. `#home` doesn't exist on ParaBank's page at all; the step was "Navigate to the ParaBank homepage," a navigation-only step whose prompt explicitly says "if already on the right page, respond done, don't interact with anything" - and `explore()` had already `goto()`'d `domain.base_url` (ParaBank's homepage) before this step's first decision was even asked for. llama3.2 ignored the instruction and invented a click anyway. This is exactly the accuracy cost flagged when switching models, showing up for real.
+
+**Prompt:** shown the screenshot, asked "whats the reason of this... its still saying this."
+
+**What was generated:** `backend/app/agents/explorer.py`'s `explore()` now checks, only for the very first step of a workflow: if that step is navigation-only (per the existing `_is_interactive_step`) and the browser's current URL already equals `domain.base_url` (true here, since `goto()` just put it there and nothing else has happened yet), the step is skipped entirely - no model call at all, so there's nothing for the model to hallucinate against. Deliberately narrow: only applies to the first step, and only when the URL genuinely already matches - a later "Navigate to X" step that legitimately needs a click to get there (e.g. following a nav link to a page not yet visited) still goes through the normal model-decides-the-action path untouched.
+
+**What was checked/modified before accepting:**
+- Confirmed against the real, already-fixed regression test for the opposite case (`test_execute_step_reinterprets_navigate_with_selector_as_click`, from Day 6/7's the_internet/dropdown loop fix) that a "Navigate to X" step still executes a real click when the browser *isn't* already at the destination - a first cut at this fix wrongly special-cased every non-interactive-step action inside `_execute_step` itself, which broke exactly that case; caught by the existing test suite before it was accepted, and reverted in favor of the narrower `explore()`-level check.
+- New Explorer tests: the redundant first step (browser already at `domain.base_url`) never reaches `_execute_step` (so never makes an LLM call); a first step where `goto()` landed somewhere else (simulating a redirect) is NOT skipped and still goes through the normal decision path.
+- Full backend suite (172 tests, +2) passes.
+- **Not yet completed:** can't verify against the real live ParaBank page from this sandbox whether `goto()` lands on an URL that string-matches `domain.base_url` *exactly* (a redirect adding a session param, for instance, would silently fall back to the old model-decides behavior rather than break anything) - worth confirming on a real run.

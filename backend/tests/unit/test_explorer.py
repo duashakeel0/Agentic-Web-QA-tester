@@ -475,3 +475,80 @@ async def test_explore_runs_live_frame_loop_alongside_steps_and_cancels_it(tmp_p
     # cancelled without doing anything.
     assert len(frame_events) >= 1
     assert frame_events[0]["screenshot_url"].startswith("/screenshots/actions/")
+
+
+async def test_explore_skips_llm_call_for_redundant_first_navigate_step(monkeypatch):
+    # Reproduces a real ParaBank failure: step 1 is "Navigate to the
+    # ParaBank homepage", but explore() already goto()'d domain.base_url
+    # before the step loop starts - so the browser's already there with
+    # zero actions taken. A weaker model (llama3.2) sometimes ignores the
+    # nav_hint telling it not to interact here and invents a click on a
+    # selector that doesn't exist (e.g. "#home"), which only ever times
+    # out. Should be skipped deterministically, with no model call at all.
+    monkeypatch.setattr(
+        explorer_module,
+        "load_domains",
+        lambda: [Domain(name="fake_domain", base_url="http://x/home", workflows=[])],
+    )
+
+    fake_browser = _FakeBrowserFull()
+    agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM())
+
+    executed_steps: list[str] = []
+
+    async def _recording_execute_step(step, actions):
+        executed_steps.append(step)
+
+    async def _noop_broken_input(step, actions):
+        return None
+
+    agent._execute_step = _recording_execute_step
+    agent._attempt_broken_input = _noop_broken_input
+
+    plan = TestPlan(
+        ticket_id="T1",
+        matched=True,
+        domain="fake_domain",
+        workflow="w",
+        steps=["Navigate to the homepage", "Click the login button"],
+    )
+
+    result = await agent.explore(plan)
+
+    assert result.completed is True
+    # The redundant first step never reached _execute_step (so never made
+    # an LLM call) - only the genuinely interactive second step did.
+    assert executed_steps == ["Click the login button"]
+
+
+async def test_explore_does_not_skip_first_step_when_not_yet_at_base_url(monkeypatch):
+    # The skip only applies when the browser is already exactly where the
+    # step wants it - if goto() landed somewhere else (a redirect, a
+    # different starting page), the step still needs a real decision.
+    monkeypatch.setattr(
+        explorer_module,
+        "load_domains",
+        lambda: [Domain(name="fake_domain", base_url="http://x/home", workflows=[])],
+    )
+
+    class _RedirectingBrowser(_FakeBrowserFull):
+        async def goto(self, url):
+            self.page.url = "http://x/redirected"
+            return "t"
+
+    fake_browser = _RedirectingBrowser()
+    agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM())
+
+    executed_steps: list[str] = []
+
+    async def _recording_execute_step(step, actions):
+        executed_steps.append(step)
+
+    agent._execute_step = _recording_execute_step
+    agent._attempt_broken_input = _recording_execute_step
+
+    plan = TestPlan(ticket_id="T1", matched=True, domain="fake_domain", workflow="w", steps=["Navigate to the homepage"])
+
+    await agent.explore(plan)
+
+    assert executed_steps == ["Navigate to the homepage"]

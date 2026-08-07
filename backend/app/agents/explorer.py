@@ -161,7 +161,23 @@ class ExplorerAgent:
                 step="(start)", action="page_loaded", selector=None, value=domain.base_url, success=True, error=None
             )
 
-            for step in plan.steps:
+            for index, step in enumerate(plan.steps):
+                if (
+                    index == 0
+                    and not self._is_interactive_step(step)
+                    and self._same_url(self._browser.page.url, domain.base_url)
+                ):
+                    # The goto() above already put the browser on
+                    # domain.base_url - a first step that's just asking to
+                    # be "on the homepage"/navigated to that same page is
+                    # therefore already satisfied, deterministically, with
+                    # no model call needed at all. Skips a weaker model
+                    # sometimes ignoring the nav_hint instruction not to
+                    # interact here and inventing an unnecessary click
+                    # instead (e.g. a hallucinated, nonexistent "#home"
+                    # selector that only ever times out).
+                    continue
+
                 if not broken_input_done and self._is_interactive_step(step):
                     await self._attempt_broken_input(step, actions)
                     broken_input_done = True
