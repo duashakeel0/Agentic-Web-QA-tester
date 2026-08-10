@@ -101,13 +101,18 @@ def _step_rows(plan: dict, exploration: dict | None) -> list[dict]:
             else:
                 status, note = "NOT REACHED", "Exploration stopped before this step was attempted."
         else:
-            last = step_actions[-1]
-            if last.get("success"):
+            # A step's real outcome is whether it was ever actually
+            # achieved, not whether its literal last logged attempt
+            # happened to succeed - a step can (and often does) need a
+            # retry, and an unrelated hiccup on a later, redundant attempt
+            # after the step already succeeded must never flip a genuinely
+            # completed step to FAIL. Only "every attempt failed" is real.
+            if any(a.get("success") for a in step_actions):
                 status = "PASS"
                 note = f"Completed successfully in {len(step_actions)} action(s)."
             else:
                 status = "FAIL"
-                note = last.get("error") or "Action failed with no further detail."
+                note = step_actions[-1].get("error") or "Action failed with no further detail."
         rows.append({"step": step, "status": status, "note": note})
     return rows
 

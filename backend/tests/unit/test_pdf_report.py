@@ -242,3 +242,32 @@ def test_step_rows_excludes_broken_input_probes():
     # real attempt at the step - should read as skipped (run completed,
     # nothing real happened here), not as a failure.
     assert rows[0]["status"] == "SKIPPED"
+
+
+def test_step_rows_passes_a_step_that_succeeded_before_a_later_unrelated_hiccup():
+    # Reproduces a real ParaBank report: the transfer's submit click
+    # actually succeeded, but the loop queried the model again (the
+    # confirmation hadn't rendered in that snapshot yet), and that second,
+    # redundant decision hit an unrelated LLM parsing error - recorded as
+    # the step's *last* action even though the step's real goal was
+    # already achieved by the first one. The step genuinely passed and
+    # must not read FAIL just because its last logged attempt was noise.
+    plan = {"steps": ["Submit the transfer"]}
+    exploration = {
+        "completed": True,
+        "actions": [
+            {
+                "step": "Submit the transfer", "action": "click", "selector": "input[type='submit']",
+                "success": True, "is_broken_input_attempt": False,
+            },
+            {
+                "step": "Submit the transfer", "action": "unknown", "selector": None,
+                "success": False, "error": "claude returned an unparseable response", "is_broken_input_attempt": False,
+            },
+        ],
+    }
+
+    rows = _step_rows(plan, exploration)
+
+    assert rows[0]["status"] == "PASS"
+    assert "2 action(s)" in rows[0]["note"]

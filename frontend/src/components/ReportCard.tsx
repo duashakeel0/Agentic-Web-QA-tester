@@ -47,10 +47,16 @@ function buildStepRows(plan: TestPlan, exploration: ExplorationResult | undefine
         ? { step, status: "SKIPPED", note: "Already satisfied when the page loaded - no action needed." }
         : { step, status: "NOT REACHED", note: "Exploration stopped before this step was attempted." };
     }
-    const last = stepActions[stepActions.length - 1];
-    if (last.success) {
+    // A step's real outcome is whether it was ever actually achieved, not
+    // whether its literal last logged attempt happened to succeed - a step
+    // can (and often does) need a retry, and an unrelated hiccup on a
+    // later, redundant attempt after the step already succeeded must
+    // never flip a genuinely completed step to FAIL. Only "every attempt
+    // failed" is a real failure for this step.
+    if (stepActions.some((a) => a.success)) {
       return { step, status: "PASS", note: `Completed successfully in ${stepActions.length} action(s).` };
     }
+    const last = stepActions[stepActions.length - 1];
     return { step, status: "FAIL", note: last.error ?? "Action failed with no further detail." };
   });
 }

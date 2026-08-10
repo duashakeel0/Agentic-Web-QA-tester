@@ -631,3 +631,22 @@ Running log of significant AI prompts used to build this project, per the intern
 - The shared `_FakeBrowser` test fixture's bare `page = object()` had no `.url` - needed one (matching `_fake_snapshot`'s URL, so existing tests' behavior is unchanged) for the new check to even run without crashing every other click-based test.
 - Full backend suite (218 tests, +1) passes, including the real-browser e2e login test, which exercises this exact code path for real (a click that navigates) and still passes.
 - **Not yet completed:** scoped specifically to `click` actions, since `fill`/`select`/`press` steps essentially never cause navigation on their own - if a future workflow has a step needing multiple sequential clicks that each navigate, this would end the step after the first one; none of the current registered workflows are written that way, but worth knowing if one ever is.
+
+---
+
+## A step's PASS/FAIL status read from the wrong action - third instance of the same bug class
+
+**Context:** A real ParaBank Transfer Funds run correctly reached `pass_with_issues` overall (LOW severity, accurate "completed and passed, 1 action needed a retry" summary) - but the per-step table showed step 7 ("Submit the transfer") as **FAIL**, with a truncated, unparseable-JSON string as its note, even though the transfer genuinely succeeded.
+
+**Prompt:** "now again wtf is this" (with the report) - the confusion this time wasn't the overall verdict (that part was correct), it was one specific step row contradicting it.
+
+**What was found:** the real sequence was: the submit click succeeded; the loop queried the model again because the confirmation hadn't rendered in that snapshot yet ("the page still shows the transfer form rather than a conf[irmation]" - visible in the model's own truncated reasoning); that second, redundant decision hit the same JSON-truncation issue as the last two rounds and got logged as a failed action; a third, unlogged decision then recognized "done." Both the frontend's `buildStepRows` (`ReportCard.tsx`) and the PDF's `_step_rows` (`pdf_report.py`) determined a step's status from `stepActions[-1]` - the *last* logged action - which picked the redundant failure over the real success that came before it. This is the same "trust the last logged item instead of the real outcome" bug as the last two rounds, just in a third location.
+
+**What was generated:**
+- `frontend/src/components/ReportCard.tsx`'s `buildStepRows` and `backend/app/pdf_report.py`'s `_step_rows` both now mark a step PASS if *any* of its actions succeeded, FAIL only if *all* of them did - matching what "step completed" actually means, rather than what its last attempt happened to be.
+
+**What was checked/modified before accepting:**
+- New tests in both places for the exact scenario: a step with a successful action followed by an unrelated failed one now reads PASS with the real action count, in both the on-screen card and the PDF generator, keeping them in agreement as intended from the original report redesign.
+- Confirmed the existing "single failed action, no successes" test still correctly reads FAIL - the fix only changes behavior when a real success is mixed in with a later failure, not for a step that never actually succeeded.
+- Full backend suite (219 tests, +1) and frontend suite (33 tests, +1) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** this is the third round fixing a "last logged item ≠ real outcome" bug in a different location (error_message, then error_message again more broadly, now step status) - all three traced back to the same underlying JSON-truncation issue still occasionally happening even at the current token budget. The framing bugs are now fixed everywhere they were found, but the truncation itself is still the thing generating the noise in the first place.

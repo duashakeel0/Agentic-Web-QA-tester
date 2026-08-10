@@ -139,6 +139,33 @@ describe("ReportCard", () => {
     expect(screen.getByText("Timed out")).toBeInTheDocument();
   });
 
+  it("shows PASS for a step that succeeded before a later, unrelated hiccup", () => {
+    // Reproduces a real ParaBank report: the submit click actually
+    // succeeded, but the loop queried the model again before the
+    // confirmation had rendered, and that second, redundant decision hit
+    // an unrelated LLM parsing error - logged as the step's *last* action
+    // even though the step's real goal was already achieved by the first
+    // one. The step genuinely passed and must not read FAIL just because
+    // its last logged attempt was noise.
+    const result = passingResult();
+    result.verification = { ...result.verification!, verdict: "pass_with_issues", warning_count: 1 };
+    result.plan = basePlan({ steps: ["Submit the transfer"] });
+    result.exploration = {
+      ...result.exploration!,
+      completed: true,
+      actions: [
+        { step: "Submit the transfer", action: "click", selector: "input[type='submit']", value: null, reasoning: null, success: true, error: null, is_broken_input_attempt: false, screenshot_path: null },
+        { step: "Submit the transfer", action: "unknown", selector: null, value: null, reasoning: null, success: false, error: "claude returned an unparseable response", is_broken_input_attempt: false, screenshot_path: null },
+      ],
+    };
+
+    render(<ReportCard result={result} />);
+
+    expect(screen.getByText("PASS")).toBeInTheDocument();
+    expect(screen.queryByText("FAIL")).not.toBeInTheDocument();
+    expect(screen.getByText("Completed successfully in 2 action(s).")).toBeInTheDocument();
+  });
+
   it("renders a Test Execution Summary donut once metrics are available", () => {
     const result = passingResult();
     result.metrics = {
