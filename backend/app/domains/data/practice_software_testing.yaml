@@ -1,0 +1,75 @@
+# practicesoftwaretesting.com ("Toolshop") - a demo hardware-store webshop
+# built specifically for QA automation practice. Steps are the
+# known-correct flow a human tester would follow. The login workflow uses
+# the site's own published demo customer account.
+name: practice_software_testing
+base_url: https://practicesoftwaretesting.com
+workflows:
+  - name: login
+    steps:
+      - Navigate to the URL https://practicesoftwaretesting.com/auth/login (a direct page navigation - do not use the search bar or any other field on the page)
+      - Enter "customer@practicesoftwaretesting.com" into the Email field
+      - Enter "welcome01" into the Password field
+      - Click the Login button
+    expected_outcome:
+      url_contains: /account
+
+  - name: browse_and_add_to_cart
+    steps:
+      - Navigate to the homepage
+      - Search for "pliers" using the search bar
+      - Open the first matching product
+      - Add the product to the cart
+      - Open the cart
+    expected_outcome:
+      text_contains: Proceed to checkout
+
+  - name: contact_us
+    steps:
+      - Navigate to /contact
+      - Enter "Jordan" into the First Name field
+      - Enter "Lee" into the Last Name field
+      - Enter "jordan.lee@example.com" into the Email field
+      - Select "Warranty" from the Subject dropdown
+      - Enter "I have a question about my recent order." into the Message field
+      - Click the Send button
+    expected_outcome:
+      text_contains: Thanks for your message
+
+  - name: view_product_details
+    steps:
+      - Navigate to the homepage
+      - Open the first product listed
+    expected_outcome:
+      text_contains: Add to cart
+
+  - name: search_no_results
+    steps:
+      - Navigate to the homepage
+      - Search for "zzzznonexistentproduct123" using the search bar
+    expected_outcome:
+      text_contains: No results
+
+  - name: filter_by_category
+    steps:
+      - Navigate to the homepage
+      - Filter the products by the "Hand Tools" category using the category filter
+    expected_outcome:
+      text_contains: Hand Tools
+
+  - name: checkout
+    steps:
+      - Navigate to the URL https://practicesoftwaretesting.com/auth/login (a direct page navigation - do not use the search bar or any other field on the page)
+      - Enter "customer@practicesoftwaretesting.com" into the Email field
+      - Enter "welcome01" into the Password field
+      - Click the Login button
+      - Search for "pliers" using the search bar
+      - Open the first matching product
+      - Add the product to the cart
+      - Open the cart
+      - Proceed to checkout
+      - Confirm or fill in the billing address
+      - Select "Cash on Delivery" as the payment method
+      - Confirm and place the order
+    expected_outcome:
+      text_contains: Payment was successful

@@ -9,6 +9,7 @@ import {
   ListChecks,
   Rocket,
   RotateCcw,
+  ShieldCheck,
   Target,
 } from "lucide-react";
 import AskAboutTest from "../components/AskAboutTest";
@@ -16,23 +17,23 @@ import BarList from "../components/charts/BarList";
 import DonutChart from "../components/charts/DonutChart";
 import LineChart from "../components/charts/LineChart";
 import ProgressRing from "../components/charts/ProgressRing";
+import ComparisonSummary from "../components/ComparisonSummary";
+import LiveBrowserView from "../components/LiveBrowserView";
 import ModelSelector from "../components/ModelSelector";
 import PipelineTimeline from "../components/PipelineTimeline";
 import ReportCard from "../components/ReportCard";
 import TalkingAgentsPanel from "../components/TalkingAgentsPanel";
 import { useAuth } from "../contexts/AuthContext";
-import { usePipelineRun, type RunStatus } from "../hooks/usePipelineRun";
+import { usePipelineRunContext } from "../contexts/PipelineRunContext";
+import type { RunStatus } from "../hooks/usePipelineRun";
 import { apiGet, ApiError } from "../services/api";
-import type { DailyStat, HistoryEntry, HistoryStats, ProviderStats } from "../types/history";
-import type { ModelChoice } from "../types/pipeline";
+import type { DailyStat, HistoryEntry, HistoryStats, ProviderStats, SiteStats } from "../types/history";
+import type { ModelChoice, Provider } from "../types/pipeline";
 import "./Dashboard.css";
 
-const AGENT_READY_ROW = [
-  { name: "Planner", color: "var(--claude-color)" },
-  { name: "Explorer", color: "var(--accent-blue)" },
-  { name: "Verifier", color: "var(--status-warning)" },
-  { name: "Reporter", color: "var(--accent)" },
-];
+// Claude first, then Ollama - the order the combined report reads in:
+// each provider's full report, then the comparison beneath both.
+const PROVIDER_ORDER: Provider[] = ["claude", "ollama"];
 
 const PROVIDER_LABELS: Record<string, string> = { claude: "Claude", ollama: "Llama (Ollama)" };
 
@@ -88,17 +89,19 @@ function Dashboard() {
   const { username, logout } = useAuth();
   const [ticketId, setTicketId] = useState("");
   const [model, setModel] = useState<ModelChoice>("claude");
-  const { status, feed, stages, results, historyIds, comparison, errorMessage, start, reset } = usePipelineRun();
+  const { status, feed, stages, frames, frameHistory, results, historyIds, comparison, errorMessage, start, reset } =
+    usePipelineRunContext();
   const { toasts, dismiss } = useRunToasts(status, errorMessage, ticketId);
 
   const [stats, setStats] = useState<HistoryStats | null>(null);
   const [daily, setDaily] = useState<DailyStat[]>([]);
   const [providerStats, setProviderStats] = useState<ProviderStats[]>([]);
   const [recentRuns, setRecentRuns] = useState<HistoryEntry[]>([]);
+  const [siteStats, setSiteStats] = useState<SiteStats[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   const running = status === "connecting" || status === "running";
-  const resultList = Object.values(results);
+  const resultList = PROVIDER_ORDER.map((p) => results[p]).filter((r) => r !== undefined);
   const primaryHistoryId = historyIds.claude ?? historyIds.ollama;
   const activeProviders = Object.keys(stages);
 
@@ -108,12 +111,14 @@ function Dashboard() {
       apiGet<DailyStat[]>("/api/history/daily?days=7"),
       apiGet<ProviderStats[]>("/api/history/provider-stats"),
       apiGet<HistoryEntry[]>("/api/history?limit=6"),
+      apiGet<SiteStats[]>("/api/history/site-stats"),
     ])
-      .then(([s, d, p, r]) => {
+      .then(([s, d, p, r, sites]) => {
         setStats(s);
         setDaily(d);
         setProviderStats(p);
         setRecentRuns(r);
+        setSiteStats(sites);
         setLoadError(null);
       })
       .catch((err) => {
@@ -222,17 +227,14 @@ function Dashboard() {
           <span className="dash-hero-eyebrow">AI Command Center</span>
           <h1>Welcome back, {username ?? "Dua"}! 👋</h1>
           <p>
-            Your AI testing team is online and ready to analyze your next website. Enter a URL or connect a Trello
-            ticket to get started.
+            Your AI testing team is online and ready to analyze your next website. Connect a Trello ticket to get
+            started.
           </p>
         </div>
-        <div className="dash-hero-agent-row" aria-label="Agent readiness">
-          {AGENT_READY_ROW.map((agent) => (
-            <span className="dash-hero-agent-chip" key={agent.name}>
-              <span className="dash-hero-agent-dot" style={{ background: agent.color }} aria-hidden="true" />
-              {agent.name}
-            </span>
-          ))}
+        <div className="dash-hero-status" aria-label="System status">
+          <span className="dash-hero-status-pulse" aria-hidden="true" />
+          <ShieldCheck size={15} aria-hidden="true" />
+          <span>4 AI agents online</span>
         </div>
       </header>
 
@@ -330,16 +332,30 @@ function Dashboard() {
                 </div>
                 <TalkingAgentsPanel feed={feed} showProvider={Object.keys(stages).length > 1} />
               </div>
+
+              <div className="dash-live-browsers">
+                {activeProviders.map((p) => (
+                  <LiveBrowserView
+                    provider={p as Provider}
+                    frame={frames[p as Provider]}
+                    history={frameHistory[p as Provider] ?? []}
+                    key={p}
+                  />
+                ))}
+              </div>
             </section>
           )}
 
           {resultList.length > 0 && (
             <section className="dash-panel">
-              <h2 className="dash-panel-title">Report{resultList.length > 1 ? "s" : ""}</h2>
-              <div className="dash-report-grid">
+              <h2 className="dash-panel-title">{resultList.length > 1 ? "Full Comparison Report" : "Report"}</h2>
+              <div className="dash-report-stack">
                 {resultList.map((result) => (
                   <ReportCard result={result} historyId={historyIds[result.provider]} key={result.provider} />
                 ))}
+                {comparison && (
+                  <ComparisonSummary comparison={comparison} claudeResult={results.claude} ollamaResult={results.ollama} />
+                )}
               </div>
               {primaryHistoryId && <AskAboutTest runId={primaryHistoryId} />}
             </section>
@@ -406,11 +422,35 @@ function Dashboard() {
                   </div>
                   <div className="dash-history-right">
                     <span className={`dash-history-status status-${run.verdict ?? "unmatched"}`}>
-                      {run.verdict?.toUpperCase() ?? "N/A"}
+                      {run.verdict ? run.verdict.replace(/_/g, " ").toUpperCase() : "N/A"}
                     </span>
                     <span className="dash-history-time">{formatDate(run.created_at)}</span>
                   </div>
                 </Link>
+              ))}
+            </div>
+          </section>
+
+          <section className="dash-panel">
+            <div className="dash-panel-heading">
+              <h2>Sites Tested</h2>
+            </div>
+            <div className="dash-site-stats-list">
+              {siteStats.length === 0 && <p className="dash-empty">No sites tested yet.</p>}
+              {siteStats.map((site) => (
+                <div className="dash-site-stats-row" key={site.domain}>
+                  <div>
+                    <div className="dash-site-stats-name">{site.domain}</div>
+                    <div className="dash-site-stats-meta">Last tested {formatDate(site.last_tested_at)}</div>
+                  </div>
+                  <div className="dash-site-stats-right">
+                    <span className="dash-site-stats-count">{site.run_count}×</span>
+                    <span className="dash-site-stats-split">
+                      <span className="dash-site-stats-pass">{site.passed} pass</span>
+                      {site.failed > 0 && <span className="dash-site-stats-fail"> · {site.failed} fail</span>}
+                    </span>
+                  </div>
+                </div>
               ))}
             </div>
           </section>
@@ -460,13 +500,6 @@ function Dashboard() {
           </section>
         </aside>
       </div>
-
-      {comparison && (
-        <section className="dash-panel">
-          <h2 className="dash-panel-title">Comparison Summary</h2>
-          <p className="dash-comparison-text">{comparison.summary}</p>
-        </section>
-      )}
     </div>
   );
 }

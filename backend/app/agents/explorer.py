@@ -12,7 +12,13 @@ if one action is slightly off, the loop guard and the step's action budget
 catch it well before it does real damage.
 """
 
+import asyncio
+import contextlib
 import json
+import logging
+import os
+import re
+from collections.abc import Awaitable, Callable
 
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -23,8 +29,27 @@ from app.agents.schema import ActionLogEntry, ExplorationResult, TestPlan
 from app.browser import BrowserSession
 from app.domains.manifest import load_domains
 
+logger = logging.getLogger(__name__)
+
+# Called with one dict per browser action (live view + report material) -
+# never allowed to affect whether exploration itself succeeds or fails,
+# see _emit_action.
+ActionCallback = Callable[[dict], Awaitable[None]]
+
+# Screenshots served straight off disk by main.py's /screenshots static
+# mount - kept separate from verifier.py's SCREENSHOT_DIR (one overwritten
+# failure shot per run) since this is one file per action, per run.
+ACTION_SCREENSHOT_DIR = "reports/screenshots/actions"
+_UNSAFE_FILENAME_CHARS = re.compile(r"[^a-zA-Z0-9_-]+")
+
 MAX_ACTIONS_PER_STEP = 6
 MAX_IDENTICAL_ACTION_REPEATS = 2
+# How often the background live-frame loop grabs a screenshot, independent
+# of the discrete per-action captures below. Discrete actions alone can be
+# seconds apart while the model "thinks" or a page loads, which reads as a
+# frozen still image rather than a live camera; this fills the gaps so the
+# live view keeps updating continuously like real video monitoring.
+LIVE_FRAME_INTERVAL_S = 0.75
 # Playwright's default actionability timeout is 30s - fine for a real,
 # slow-loading element, but ruinous for a hallucinated/invalid selector
 # (the loop guard already caps an exploration at MAX_ACTIONS_PER_STEP
@@ -33,25 +58,58 @@ MAX_IDENTICAL_ACTION_REPEATS = 2
 # that a real element still has time to appear.
 ACTION_TIMEOUT_MS = 5000
 NAVIGATE_TIMEOUT_MS = 15000
-# Decisions are one short JSON object with a one-sentence reasoning field -
-# capping generation this low keeps every one of the many per-action calls
-# fast without truncating a real response.
-DECISION_MAX_TOKENS = 200
+# Decisions are one short JSON object with a one-sentence reasoning field,
+# but 200, then 600, both proved too tight in practice - Claude sometimes
+# spends part of the budget on brief internal reasoning before the actual
+# JSON, cutting the response off with no text content at all. Past just
+# costing an extra retry, this has a worse failure mode under tight
+# budgets: a short decision ("done") fits where a longer one ("fill" with
+# a selector/value/reasoning) doesn't, so truncation can systematically
+# bias the model toward falsely claiming a step is done rather than
+# actually completing it - confirmed on a real ParaBank run where a
+# required field was silently never filled this way, correctly failing
+# the real site's own form validation. 1200 leaves real headroom.
+DECISION_MAX_TOKENS = 1200
 
 _NAVIGATION_ONLY_PREFIXES = ("navigate to", "wait for")
+# A selector starting with any of these is already a real CSS selector
+# (id/class/attribute/combinator) and left alone by _resolve_selector.
+_CSS_SELECTOR_PREFIX_CHARS = ("#", ".", "[", "*", ">", "~", "+", ":")
+# Ollama's Llama 3.1 sometimes writes an XPath-style text match where a CSS
+# selector is expected - a[text()='Dropdown'] or a:contains('Dropdown') -
+# which isn't valid CSS/Playwright syntax and never matches anything. The
+# *intent* (match by visible text) is real, though, and maps directly onto
+# Playwright's own text= selector engine.
+_XPATH_TEXT_PATTERN = re.compile(r"""text\(\)\s*=\s*['"]([^'"]+)['"]""")
+_CONTAINS_TEXT_PATTERN = re.compile(r"""contains\([^,)]*,?\s*['"]([^'"]+)['"]\s*\)""")
+# Matches only a plain "#some-id" selector - not "#foo .bar", "#foo[x=y]",
+# or anything more elaborate - since only this simple shape is safe to
+# rewrite by matching against a single element's real id.
+_BARE_ID_SELECTOR_PATTERN = re.compile(r"^#([\w-]+)$")
 
 _SNAPSHOT_JS = """
 () => Array.from(document.querySelectorAll(
   'input, textarea, select, button, a[href], [role="button"]'
-)).slice(0, 25).map((el) => ({
-  tag: el.tagName.toLowerCase(),
-  type: el.getAttribute('type'),
-  id: el.id || null,
-  name: el.getAttribute('name'),
-  placeholder: el.getAttribute('placeholder'),
-  text: (el.innerText || el.value || '').trim().slice(0, 60),
-}))
+)).slice(0, 25).map((el) => {
+  const r = el.getBoundingClientRect();
+  return {
+    tag: el.tagName.toLowerCase(),
+    type: el.getAttribute('type'),
+    id: el.id || null,
+    name: el.getAttribute('name'),
+    placeholder: el.getAttribute('placeholder'),
+    text: (el.innerText || el.value || '').trim().slice(0, 60),
+    // Viewport-relative, matching a non-full-page page.screenshot() 1:1 -
+    // what lets the live view draw a box over exactly the element a
+    // decision acted on.
+    rect: { x: r.x, y: r.y, width: r.width, height: r.height },
+  };
+})
 """
+
+
+def _safe_filename(raw: str) -> str:
+    return _UNSAFE_FILENAME_CHARS.sub("_", raw)[:120]
 
 
 class ExplorerError(Exception):
@@ -61,9 +119,18 @@ class ExplorerError(Exception):
 
 
 class ExplorerAgent:
-    def __init__(self, browser: BrowserSession | None = None, llm: LLMClient | None = None) -> None:
+    def __init__(
+        self,
+        browser: BrowserSession | None = None,
+        llm: LLMClient | None = None,
+        on_action: ActionCallback | None = None,
+    ) -> None:
         self._browser = browser or BrowserSession()
         self._llm = llm or ClaudeLLMClient()
+        self._on_action = on_action
+        self._action_index = 0
+        self._live_frame_index = 0
+        self._run_key = "run"
 
     @property
     def browser(self) -> BrowserSession:
@@ -84,15 +151,45 @@ class ExplorerAgent:
         actions: list[ActionLogEntry] = []
         broken_input_done = False
         completed_ok = False
+        self._action_index = 0
+        self._live_frame_index = 0
+        # Namespaces screenshot filenames so a concurrent "compare both" run
+        # (same ticket/domain/workflow, two providers at once) never has one
+        # provider's screenshots overwrite the other's.
+        self._run_key = _safe_filename(f"{plan.ticket_id}_{plan.domain}_{plan.workflow}_{self._llm.provider}")
 
         await self._browser.start()
+        # Runs alongside the whole exploration below, only when someone's
+        # actually listening for live frames - a dashboard-less/report-only
+        # run (e.g. Trello-triggered) has no on_action, so there's no point
+        # burning screenshot IO for a live view nobody's watching.
+        frame_task = asyncio.create_task(self._live_frame_loop()) if self._on_action is not None else None
         try:
             # BrowserSession.goto(), not page.goto() directly - it already
             # waits on "domcontentloaded" instead of "load", which is what
             # makes real-world sites that never cleanly fire "load" work.
             await self._browser.goto(domain.base_url)
+            await self._emit_action(
+                step="(start)", action="page_loaded", selector=None, value=domain.base_url, success=True, error=None
+            )
 
-            for step in plan.steps:
+            for index, step in enumerate(plan.steps):
+                if (
+                    index == 0
+                    and not self._is_interactive_step(step)
+                    and self._same_url(self._browser.page.url, domain.base_url)
+                ):
+                    # The goto() above already put the browser on
+                    # domain.base_url - a first step that's just asking to
+                    # be "on the homepage"/navigated to that same page is
+                    # therefore already satisfied, deterministically, with
+                    # no model call needed at all. Skips a weaker model
+                    # sometimes ignoring the nav_hint instruction not to
+                    # interact here and inventing an unnecessary click
+                    # instead (e.g. a hallucinated, nonexistent "#home"
+                    # selector that only ever times out).
+                    continue
+
                 if not broken_input_done and self._is_interactive_step(step):
                     await self._attempt_broken_input(step, actions)
                     broken_input_done = True
@@ -120,6 +217,10 @@ class ExplorerAgent:
                 error=str(exc),
             )
         finally:
+            if frame_task is not None:
+                frame_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await frame_task
             if not (completed_ok and not close_browser):
                 await self._browser.close()
 
@@ -131,6 +232,157 @@ class ExplorerAgent:
         page = self._browser.page
         elements = await page.evaluate(_SNAPSHOT_JS)
         return {"url": page.url, "title": await page.title(), "elements": elements}
+
+    @staticmethod
+    def _same_url(a: str, b: str) -> bool:
+        return a.rstrip("/") == b.rstrip("/")
+
+    @staticmethod
+    def _resolve_selector(selector: str | None, elements: list[dict]) -> str | None:
+        """A weaker model (Ollama's local Llama 3.1 especially) sometimes
+        echoes an element's bare id/name straight from the snapshot instead
+        of building a real CSS selector from it - "user-name" instead of
+        "#user-name" - which then fails or times out against a real page
+        even though the model clearly meant that exact element. Matched
+        against the same snapshot the model was shown, so a near-miss like
+        that still resolves to the right element instead of failing the
+        action outright.
+        """
+        if not selector:
+            return selector
+        candidate = selector.strip()
+        if not candidate:
+            return selector
+
+        text_match = _XPATH_TEXT_PATTERN.search(candidate) or _CONTAINS_TEXT_PATTERN.search(candidate)
+        if text_match:
+            return f'text="{text_match.group(1)}"'
+
+        bare_id_match = _BARE_ID_SELECTOR_PATTERN.match(candidate)
+        if bare_id_match:
+            id_part = bare_id_match.group(1)
+            if not any(element.get("id") == id_part for element in elements):
+                for element in elements:
+                    el_id = element.get("id")
+                    if el_id and el_id.lower() == id_part.lower():
+                        # A model sometimes echoes the human-readable field
+                        # label's capitalization ("#Email", from "the Email
+                        # field") instead of the real id it was shown in the
+                        # snapshot ("email") - CSS id selectors are
+                        # case-sensitive, so that guess always fails
+                        # outright even though it's clearly meant to be
+                        # this exact element. Corrected to the real casing.
+                        return f"#{el_id}"
+            return selector
+
+        if candidate.startswith(_CSS_SELECTOR_PREFIX_CHARS) or " " in candidate:
+            return selector
+        for element in elements:
+            if element.get("id") == candidate:
+                return f"#{candidate}"
+        for element in elements:
+            if element.get("name") == candidate:
+                return f'[name="{candidate}"]'
+        return selector
+
+    async def _element_box(self, selector: str | None) -> dict | None:
+        """The live bounding box of whatever `selector` currently resolves
+        to on the real page, queried straight through Playwright rather
+        than cross-referenced against the snapshot list - works for every
+        selector shape the model can produce (#id, class, attribute,
+        Playwright's own text= engine, nested combinators), not just a
+        bare id/name lookup. None for a selector-less action or one that
+        matches nothing (already gone, hidden, or never existed)."""
+        if not selector:
+            return None
+        try:
+            box = await self._browser.page.locator(selector).first.bounding_box(timeout=1000)
+        except PlaywrightError:
+            return None
+        if box is None:
+            return None
+        return {"x": box["x"], "y": box["y"], "width": box["width"], "height": box["height"]}
+
+    async def _emit_action(
+        self,
+        *,
+        step: str,
+        action: str,
+        selector: str | None,
+        value: str | None,
+        success: bool,
+        error: str | None,
+        is_broken_input_attempt: bool = False,
+    ) -> str | None:
+        """Best-effort live-view/report material for one action: a
+        screenshot saved to disk (served by main.py's /screenshots mount,
+        and what the PDF report + ReportCard embed later, via the returned
+        URL) plus a bounding box for whatever element the action targeted.
+        Wrapped in one broad try/except on purpose - a screenshot failure
+        (page mid-navigation, browser closing, disk full) must never fail
+        the actual QA test, which is the entire point of this being a side
+        channel and not part of the real action-execution path above.
+        Returns the screenshot's URL (for ActionLogEntry.screenshot_path),
+        or None if there's no on_action listener or capture failed."""
+        if self._on_action is None:
+            return None
+        try:
+            screenshot_bytes = await self._browser.page.screenshot()
+            self._action_index += 1
+            filename = f"{self._run_key}_{self._action_index:03d}.png"
+            os.makedirs(ACTION_SCREENSHOT_DIR, exist_ok=True)
+            with open(os.path.join(ACTION_SCREENSHOT_DIR, filename), "wb") as f:
+                f.write(screenshot_bytes)
+            screenshot_url = f"/screenshots/actions/{filename}"
+            viewport = self._browser.page.viewport_size
+            await self._on_action(
+                {
+                    "kind": "action",
+                    "step": step,
+                    "action": action,
+                    "selector": selector,
+                    "value": value,
+                    "success": success,
+                    "error": error,
+                    "screenshot_url": screenshot_url,
+                    "target_box": await self._element_box(selector),
+                    "viewport": viewport,
+                    "is_broken_input_attempt": is_broken_input_attempt,
+                }
+            )
+            return screenshot_url
+        except Exception:
+            logger.exception("Failed to capture/emit a live action frame - continuing without it.")
+            return None
+
+    async def _live_frame_loop(self) -> None:
+        """Continuously emits a screenshot at a fixed interval, independent
+        of the discrete per-action captures above - what gives the live
+        view a genuinely video-like, always-updating feed instead of one
+        that only jumps at each browser action (which can be seconds apart
+        while the model "thinks" or a page loads). Runs as a background
+        task alongside the step loop for the lifetime of one exploration
+        and is cancelled by explore() once it ends."""
+        while True:
+            await asyncio.sleep(LIVE_FRAME_INTERVAL_S)
+            try:
+                screenshot_bytes = await self._browser.page.screenshot()
+                self._live_frame_index += 1
+                filename = f"{self._run_key}_live_{self._live_frame_index:04d}.png"
+                os.makedirs(ACTION_SCREENSHOT_DIR, exist_ok=True)
+                with open(os.path.join(ACTION_SCREENSHOT_DIR, filename), "wb") as f:
+                    f.write(screenshot_bytes)
+                await self._on_action(
+                    {
+                        "kind": "frame",
+                        "screenshot_url": f"/screenshots/actions/{filename}",
+                        "viewport": self._browser.page.viewport_size,
+                    }
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.debug("Live frame capture failed - continuing without it.", exc_info=True)
 
     async def _execute_action(self, action: str, selector: str | None, value: str | None) -> tuple[bool, str | None]:
         page = self._browser.page
@@ -168,16 +420,103 @@ class ExplorerAgent:
 
         for _ in range(MAX_ACTIONS_PER_STEP):
             snapshot = await self._snapshot()
-            decision, _ = await self._llm.complete_json(
-                self._step_prompt(step, snapshot, step_actions), max_tokens=DECISION_MAX_TOKENS
-            )
+            try:
+                decision, _ = await self._llm.complete_json(
+                    self._step_prompt(step, snapshot, step_actions), max_tokens=DECISION_MAX_TOKENS
+                )
+            except LLMError as exc:
+                # A transient model failure (Ollama slow/unreachable for one
+                # call, an unparseable response) shouldn't blow up the whole
+                # exploration - recorded as a failed "attempt" like any other
+                # so it counts against the step's action budget and the next
+                # loop iteration gets a fresh chance instead of crashing out.
+                screenshot_url = await self._emit_action(
+                    step=step, action="unknown", selector=None, value=None, success=False, error=str(exc)
+                )
+                entry = ActionLogEntry(
+                    step=step, action="unknown", success=False, error=str(exc), screenshot_path=screenshot_url
+                )
+                actions.append(entry)
+                step_actions.append(entry)
+                continue
             action = decision.get("action", "unknown")
 
             if action == "done":
                 return
 
-            selector = decision.get("selector")
             value = decision.get("value")
+            if action == "navigate" and value and self._same_url(value, snapshot["url"]):
+                # The model asked to navigate to the page it's already on -
+                # for a navigation-only step that IS "done", just phrased as
+                # a navigate. Told to answer "done" directly in this case
+                # (see the nav_hint in _step_prompt), but a weaker model
+                # (Ollama's) doesn't reliably follow that and instead
+                # re-issues the same no-op navigate call every time,
+                # tripping the identical-action loop guard below. Checked
+                # deterministically here so the step still completes
+                # regardless of whether the model phrases it correctly.
+                return
+
+            selector = self._resolve_selector(decision.get("selector"), snapshot["elements"])
+
+            if action == "navigate" and not value and selector:
+                # The model gave "navigate" a selector instead of a URL -
+                # almost always means "follow this link" rather than a URL
+                # it forgot to build, and executing it as a literal
+                # navigate always fails outright (no URL). Reinterpreted as
+                # a click on that same element instead of failing the exact
+                # same malformed decision 3 times in a row and tripping the
+                # loop guard below over something a click would've handled.
+                action = "click"
+
+            if not self._is_interactive_step(step) and action in ("fill", "select", "press"):
+                # A navigation-only step (see nav_hint in _step_prompt) is
+                # asking to be on a different page, not to interact with
+                # anything currently on this one - "fill"/"select"/"press"
+                # can never accomplish that regardless of which element
+                # they target (only "navigate" or "click"-a-link can), so
+                # one here is always wrong, not just usually wrong. Most
+                # commonly shows up as typing real values into whatever
+                # text input the page happens to have (a search bar), which
+                # this rejects deterministically instead of letting
+                # Playwright actually type into it - fed back as a failed
+                # attempt (not silently dropped) so the next decision sees
+                # exactly why and which action types are actually valid here.
+                error = (
+                    f"{action!r} cannot satisfy a navigation-only step - "
+                    "use 'navigate' with a full URL, or 'click' a link, instead."
+                )
+                screenshot_url = await self._emit_action(
+                    step=step, action=action, selector=selector, value=value, success=False, error=error
+                )
+                entry = ActionLogEntry(
+                    step=step,
+                    action=action,
+                    selector=selector,
+                    value=value,
+                    reasoning=decision.get("reasoning"),
+                    success=False,
+                    error=error,
+                    screenshot_path=screenshot_url,
+                )
+                actions.append(entry)
+                step_actions.append(entry)
+                continue
+
+            if any(a.action == action and a.selector == selector and a.value == value and a.success for a in step_actions):
+                # The model re-issued an action that already succeeded
+                # earlier this step instead of recognizing the step is
+                # done - e.g. re-filling the same field with the same
+                # value repeatedly rather than answering "done" (told to
+                # in the prompt/history above, but a weaker or
+                # speed-optimized model doesn't always follow it). The
+                # field's already in that state; repeating it again can
+                # only ever be a no-op, so it's treated as implicit
+                # completion instead of burning the action budget or
+                # eventually tripping the loop guard below into a hard
+                # failure over something that was never actually stuck.
+                return
+
             signature = (action, selector, value)
             seen_signatures[signature] = seen_signatures.get(signature, 0) + 1
             if seen_signatures[signature] > MAX_IDENTICAL_ACTION_REPEATS:
@@ -187,6 +526,14 @@ class ExplorerAgent:
                 )
 
             success, error = await self._execute_action(action, selector, value)
+            screenshot_url = await self._emit_action(
+                step=step,
+                action=action,
+                selector=selector,
+                value=value,
+                success=success,
+                error=error,
+            )
             entry = ActionLogEntry(
                 step=step,
                 action=action,
@@ -195,9 +542,26 @@ class ExplorerAgent:
                 reasoning=decision.get("reasoning"),
                 success=success,
                 error=error,
+                screenshot_path=screenshot_url,
             )
             actions.append(entry)
             step_actions.append(entry)
+
+            if success and action == "click" and not self._same_url(self._browser.page.url, snapshot["url"]):
+                # A successful click that actually navigated to a new page
+                # almost always means the step's real-world goal (submit a
+                # form, follow a link, log in) was just achieved - looping
+                # back to the model hands it a brand-new page it was never
+                # asked about, and a weaker model can mistake an unrelated
+                # element there for something it still needs to click. Real
+                # case this reproduces: a successful ParaBank login click
+                # landed on the Accounts Overview page, which has its own
+                # "Log Out" link - Llama took that as something to act on
+                # next and clicked it, undoing the login it had just
+                # completed. Checked deterministically rather than relying
+                # on the model reliably answering "done" itself once the
+                # goal's already met.
+                return
 
         raise ExplorerError(f"Explorer could not complete step {step!r} within {MAX_ACTIONS_PER_STEP} actions.")
 
@@ -220,9 +584,18 @@ class ExplorerAgent:
             return
 
         action = decision.get("action", "unknown")
-        selector = decision.get("selector")
+        selector = self._resolve_selector(decision.get("selector"), snapshot["elements"])
         value = decision.get("value")
         success, error = await self._execute_action(action, selector, value)
+        screenshot_url = await self._emit_action(
+            step=step,
+            action=action,
+            selector=selector,
+            value=value,
+            success=success,
+            error=error,
+            is_broken_input_attempt=True,
+        )
         actions.append(
             ActionLogEntry(
                 step=step,
@@ -233,6 +606,7 @@ class ExplorerAgent:
                 success=success,
                 error=error,
                 is_broken_input_attempt=True,
+                screenshot_path=screenshot_url,
             )
         )
 
@@ -274,9 +648,19 @@ Interactive elements on the page (tag, type, id, name, placeholder, visible text
 {json.dumps(snapshot["elements"], indent=2)}
 
 Decide the single next browser action needed to make progress on this step,
-using the real element info above to build the selector. Respond with ONLY a
-JSON object, no other text, in exactly this shape:
-{{"action": "fill"|"click"|"select"|"press"|"navigate"|"done", "selector": "<CSS selector, or null for navigate/done>", "value": "<text/URL/option value, or null>", "reasoning": "<one short sentence>"}}
+using the real element info above to build the selector. The selector must
+be a real CSS selector, not a bare id/name string - if an element's "id" is
+"user-name", the selector is "#user-name", NOT "user-name". Never use XPath
+syntax like [text()='X'] or :contains('X') - they are not valid CSS; to
+match by visible text use Playwright's own syntax instead: text="X".
+
+"navigate" is ONLY for typing a full URL directly (selector must be null,
+value must be the complete URL). To follow a link that's already on the
+page, use "click" with that link's selector instead - never "navigate"
+with a selector and no URL.
+
+Respond with ONLY a JSON object, no other text, in exactly this shape:
+{{"action": "fill"|"click"|"select"|"press"|"navigate"|"done", "selector": "<CSS selector, e.g. '#user-name', or null for navigate/done>", "value": "<text/URL/option value, or null>", "reasoning": "<one short sentence>"}}
 
 Use "done" only once the current page already satisfies this step.
 """
@@ -299,6 +683,11 @@ Interactive elements on the page (tag, type, id, name, placeholder, visible text
 {json.dumps(snapshot["elements"], indent=2)}
 
 Decide ONE browser action that deliberately uses broken input for this step.
-Respond with ONLY a JSON object, no other text, in exactly this shape:
-{{"action": "fill"|"click"|"select"|"press", "selector": "<selector>", "value": "<deliberately invalid/empty value, or null>", "reasoning": "<what makes this input broken and what you expect to happen>"}}
+The selector must be a real CSS selector, not a bare id/name string - if an
+element's "id" is "user-name", the selector is "#user-name", NOT "user-name".
+Never use XPath syntax like [text()='X'] or :contains('X') - they are not
+valid CSS; to match by visible text use Playwright's own syntax instead:
+text="X". Respond with ONLY a JSON object, no other text, in exactly this
+shape:
+{{"action": "fill"|"click"|"select"|"press", "selector": "<CSS selector, e.g. '#user-name'>", "value": "<deliberately invalid/empty value, or null>", "reasoning": "<what makes this input broken and what you expect to happen>"}}
 """

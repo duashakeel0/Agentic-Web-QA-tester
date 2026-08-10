@@ -11,12 +11,14 @@ PipelineResult, and the comparison between them.
 """
 
 import asyncio
+import os
 import time
 from collections.abc import Awaitable, Callable, Coroutine
 from typing import TypeVar
 
 from app.agents.claude_client import ClaudeLLMClient
 from app.agents.explorer import ExplorerAgent
+from app.agents.groq_client import GroqLLMClient
 from app.agents.llm_client import LLMClient
 from app.agents.ollama_client import OllamaLLMClient
 from app.agents.planner import PlannerAgent
@@ -46,6 +48,13 @@ def make_llm(provider: str) -> LLMClient:
     if provider == "claude":
         return ClaudeLLMClient()
     if provider == "ollama":
+        # OLLAMA_BACKEND lets the "ollama" slot run on Groq's hosted Llama
+        # instead of a local Ollama install - same interface, same
+        # provider label everywhere downstream, just a much faster place
+        # to actually run the model when local CPU inference is the
+        # bottleneck. Defaults to local so nothing changes unless opted in.
+        if os.environ.get("OLLAMA_BACKEND", "local").lower() == "groq":
+            return GroqLLMClient()
         return OllamaLLMClient()
     raise ValueError(f"Unknown model provider: {provider!r} - expected 'claude' or 'ollama'.")
 
@@ -68,7 +77,7 @@ def _narrate(agent_name: str, result) -> str:
         return f"Completed the workflow in {len(result.actions)} action(s)."
     if agent_name == "verifier":
         suffix = f" {result.explanation}" if result.explanation else ""
-        return f"Verdict: {result.verdict.upper()}.{suffix}"
+        return f"Verdict: {result.verdict.replace('_', ' ').upper()}.{suffix}"
     if agent_name == "reporter":
         count = len(result.findings)
         return f"Report ready - {count} confirmed finding(s)." if count else "Report ready - no confirmed findings."
@@ -167,7 +176,16 @@ async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | 
             total_duration_ms=(finished_at - started_at) * 1000,
         )
 
-    explorer = ExplorerAgent(llm=llm)
+    async def on_action(event: dict) -> None:
+        # The Explorer tags each event "action" (a discrete, model-decided
+        # browser action - goes in the action log/filmstrip/report) or
+        # "frame" (a background live-view tick on a fixed interval, purely
+        # visual, never logged) - forwarded here as the WS event's own
+        # "type" so the two render differently on the dashboard.
+        event_type = event.pop("kind", "action")
+        await _emit(on_event, {"type": event_type, "provider": provider, "agent": "explorer", **event})
+
+    explorer = ExplorerAgent(llm=llm, on_action=on_action)
     exploration = await timed("explorer", explorer.explore(plan, close_browser=False))
 
     verifier = VerifierAgent(llm=llm)

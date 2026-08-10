@@ -1,21 +1,27 @@
 import { useState } from "react";
 import { AlertTriangle, Rocket, RotateCcw } from "lucide-react";
 import ComparisonSummary from "../components/ComparisonSummary";
+import LiveBrowserView from "../components/LiveBrowserView";
 import ModelSelector from "../components/ModelSelector";
 import PipelineTimeline from "../components/PipelineTimeline";
 import ReportCard from "../components/ReportCard";
 import TalkingAgentsPanel from "../components/TalkingAgentsPanel";
-import { usePipelineRun } from "../hooks/usePipelineRun";
-import type { ModelChoice } from "../types/pipeline";
+import { usePipelineRunContext } from "../contexts/PipelineRunContext";
+import type { ModelChoice, Provider } from "../types/pipeline";
 import "./RunTest.css";
+
+// Claude first, then Ollama - the order the combined report reads in: each
+// provider's full report, then the comparison beneath both.
+const PROVIDER_ORDER: Provider[] = ["claude", "ollama"];
 
 function RunTest() {
   const [ticketId, setTicketId] = useState("");
   const [model, setModel] = useState<ModelChoice>("claude");
-  const { status, feed, stages, results, comparison, errorMessage, start, reset } = usePipelineRun();
+  const { status, feed, stages, frames, frameHistory, results, comparison, errorMessage, start, reset } =
+    usePipelineRunContext();
 
   const running = status === "connecting" || status === "running";
-  const resultList = Object.values(results);
+  const resultList = PROVIDER_ORDER.map((p) => results[p]).filter((r) => r !== undefined);
 
   return (
     <div className="run-test-page">
@@ -92,20 +98,30 @@ function RunTest() {
         </div>
       )}
 
-      {resultList.length > 0 && (
-        <div className="run-test-reports">
-          <h2 className="run-test-section-title">Report{resultList.length > 1 ? "s" : ""}</h2>
-          <div className="run-test-report-grid">
-            {resultList.map((result) => (
-              <ReportCard result={result} key={result.provider} />
-            ))}
-          </div>
+      {Object.keys(stages).length > 0 && (
+        <div className="run-test-browsers">
+          {Object.keys(stages).map((p) => (
+            <LiveBrowserView
+              provider={p as Provider}
+              frame={frames[p as Provider]}
+              history={frameHistory[p as Provider] ?? []}
+              key={p}
+            />
+          ))}
         </div>
       )}
 
-      {comparison && (
-        <div className="run-test-comparison">
-          <ComparisonSummary comparison={comparison} />
+      {resultList.length > 0 && (
+        <div className="run-test-reports">
+          <h2 className="run-test-section-title">{resultList.length > 1 ? "Full Comparison Report" : "Report"}</h2>
+          <div className="run-test-report-stack">
+            {resultList.map((result) => (
+              <ReportCard result={result} key={result.provider} />
+            ))}
+            {comparison && (
+              <ComparisonSummary comparison={comparison} claudeResult={results.claude} ollamaResult={results.ollama} />
+            )}
+          </div>
         </div>
       )}
     </div>

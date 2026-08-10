@@ -1,0 +1,71 @@
+# automationexercise.com - a demo e-commerce site built specifically for
+# QA automation practice. Steps are the known-correct flow a human tester
+# would follow. Deliberately excludes a "create account" workflow since
+# account registration isn't idempotent (a fixed email address only
+# succeeds once - every run after the first would fail on "Email Address
+# already exist!"), unlike the workflows below.
+name: automation_exercise
+base_url: https://automationexercise.com
+workflows:
+  - name: browse_and_add_to_cart
+    steps:
+      - Navigate to /products
+      - Search for "dress" using the search bar
+      - Add the first matching product to the cart
+      - Open the cart from the confirmation popup
+    expected_outcome:
+      text_contains: Proceed To Checkout
+
+  - name: contact_us
+    steps:
+      - Navigate to /contact_us
+      - Enter "Jordan Lee" into the Name field
+      - Enter "jordan.lee@example.com" into the Email field
+      - Enter "Product question" into the Subject field
+      - Enter "I have a question about a recent order." into the Message field
+      - Click the Submit button
+    expected_outcome:
+      text_contains: Success! Your details have been submitted successfully.
+
+  - name: search_products
+    steps:
+      - Navigate to /products
+      - Search for "top" using the search bar
+    expected_outcome:
+      text_contains: SEARCHED PRODUCTS
+
+  - name: category_browse
+    steps:
+      - Navigate to the homepage
+      - Open the "Women" category from the left sidebar, then the "Dress" subcategory
+    expected_outcome:
+      text_contains: WOMEN - DRESS PRODUCTS
+
+  - name: subscribe_to_newsletter
+    steps:
+      - Navigate to the homepage
+      - Scroll to the Subscription section in the footer
+      - Enter "jordan.lee@example.com" into the subscription email field
+      - Click the subscribe button
+    expected_outcome:
+      text_contains: You have been successfully subscribed!
+
+  - name: login_invalid_credentials
+    steps:
+      - Navigate to /login
+      - Enter "nonexistent@example.com" into the login Email field
+      - Enter "wrongpassword123" into the login Password field
+      - Click the login form's Login button
+    expected_outcome:
+      text_contains: Your email or password is incorrect!
+
+  - name: write_product_review
+    steps:
+      - Navigate to /products
+      - Open the first product listed
+      - Enter "Jordan Lee" into the review Name field
+      - Enter "jordan.lee@example.com" into the review Email field
+      - Enter "Great product, works as expected." into the review Message field
+      - Click the review form's Submit button
+    expected_outcome:
+      text_contains: Thank you for your review.

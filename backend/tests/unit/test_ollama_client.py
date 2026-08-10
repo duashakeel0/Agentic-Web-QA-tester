@@ -57,3 +57,31 @@ async def test_custom_host_and_model_from_constructor(httpx_mock):
 
     body = json.loads(request.content)
     assert body["model"] == "custom-model"
+
+
+async def test_sends_keep_alive_so_ollama_stays_warm_between_calls(httpx_mock):
+    # Ollama's own default unloads the model 5 minutes after the last call -
+    # sending keep_alive on every request means a normal gap between
+    # actions/runs doesn't pay the multi-minute reload penalty again.
+    httpx_mock.add_response(json={"response": "ok"})
+    client = OllamaLLMClient()
+
+    await client.complete("prompt")
+
+    import json
+
+    body = json.loads(httpx_mock.get_requests()[0].content)
+    assert body["keep_alive"] == "30m"
+
+
+async def test_keep_alive_configurable_via_env(monkeypatch, httpx_mock):
+    monkeypatch.setenv("OLLAMA_KEEP_ALIVE", "1h")
+    httpx_mock.add_response(json={"response": "ok"})
+    client = OllamaLLMClient()
+
+    await client.complete("prompt")
+
+    import json
+
+    body = json.loads(httpx_mock.get_requests()[0].content)
+    assert body["keep_alive"] == "1h"

@@ -25,6 +25,7 @@ class ActionLogEntry(BaseModel):
     success: bool
     error: str | None = None
     is_broken_input_attempt: bool = False
+    screenshot_path: str | None = None  # URL under /screenshots/, served by main.py's static mount
 
 
 class ExplorationResult(BaseModel):
@@ -42,7 +43,11 @@ class VerifierResult(BaseModel):
     ticket_id: str
     domain: str
     workflow: str
-    verdict: str  # "pass" | "fail"
+    verdict: str  # "pass" | "pass_with_issues" | "fail"
+    # Real (non-broken-input-probe) actions that failed along the way but
+    # didn't stop the run from reaching the correct final state - what
+    # verdict="pass_with_issues" is based on. Always 0 for "pass"/"fail".
+    warning_count: int = 0
     assertion_checked: dict
     initial_check_passed: bool
     retried: bool

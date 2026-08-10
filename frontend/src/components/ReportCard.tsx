@@ -1,5 +1,6 @@
 import { useState } from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -13,11 +14,59 @@ import {
   Ticket,
   XCircle,
 } from "lucide-react";
+import { API_BASE_URL } from "../config";
 import { downloadFile } from "../services/api";
-import type { PipelineResult, Provider } from "../types/pipeline";
+import type { ActionLogEntry, ExplorationResult, PipelineResult, Provider, TestPlan } from "../types/pipeline";
+import DonutChart from "./charts/DonutChart";
 import "./ReportCard.css";
 
 const PROVIDER_LABELS: Record<Provider, string> = { claude: "Claude", ollama: "Llama (Ollama)" };
+
+type StepStatus = "PASS" | "FAIL" | "SKIPPED" | "NOT REACHED";
+
+interface StepRow {
+  step: string;
+  status: StepStatus;
+  note: string;
+}
+
+/** One row per planned test step, derived entirely from the real action
+ * log - mirrors backend/app/pdf_report.py's _step_rows() so the on-screen
+ * report and the downloaded PDF agree on what happened. A step with no
+ * actions at all is either "skipped" (already satisfied when the page
+ * loaded, only possible for a completed run) or "not reached" (exploration
+ * stopped before it). */
+function buildStepRows(plan: TestPlan, exploration: ExplorationResult | undefined): StepRow[] {
+  const actions = exploration?.actions ?? [];
+  const completed = exploration?.completed ?? false;
+
+  return plan.steps.map((step) => {
+    const stepActions = actions.filter((a: ActionLogEntry) => a.step === step && !a.is_broken_input_attempt);
+    if (stepActions.length === 0) {
+      return completed
+        ? { step, status: "SKIPPED", note: "Already satisfied when the page loaded - no action needed." }
+        : { step, status: "NOT REACHED", note: "Exploration stopped before this step was attempted." };
+    }
+    // A step's real outcome is whether it was ever actually achieved, not
+    // whether its literal last logged attempt happened to succeed - a step
+    // can (and often does) need a retry, and an unrelated hiccup on a
+    // later, redundant attempt after the step already succeeded must
+    // never flip a genuinely completed step to FAIL. Only "every attempt
+    // failed" is a real failure for this step.
+    if (stepActions.some((a) => a.success)) {
+      return { step, status: "PASS", note: `Completed successfully in ${stepActions.length} action(s).` };
+    }
+    const last = stepActions[stepActions.length - 1];
+    return { step, status: "FAIL", note: last.error ?? "Action failed with no further detail." };
+  });
+}
+
+const STEP_STATUS_CLASS: Record<StepStatus, string> = {
+  PASS: "step-status-pass",
+  FAIL: "step-status-fail",
+  SKIPPED: "step-status-skip",
+  "NOT REACHED": "step-status-skip",
+};
 
 function DownloadReportButton({ historyId, ticketId }: { historyId: number; ticketId: string }) {
   const [downloading, setDownloading] = useState(false);
@@ -66,14 +115,28 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
     );
   }
 
-  const passed = verification?.verdict === "pass";
+  const verdict = verification?.verdict;
+  const isPass = verdict === "pass";
+  const isWarn = verdict === "pass_with_issues";
+  const isFail = !isPass && !isWarn; // covers "fail" and a missing verification
+
+  const cardClass = isFail ? "report-fail" : isWarn ? "report-warn" : "report-pass";
+  const badgeClass = isFail ? "report-badge-fail" : isWarn ? "report-badge-warn" : "report-badge-pass";
+  const badgeIcon = isFail ? (
+    <XCircle size={12} aria-hidden="true" />
+  ) : isWarn ? (
+    <AlertTriangle size={12} aria-hidden="true" />
+  ) : (
+    <CheckCircle2 size={12} aria-hidden="true" />
+  );
+  const badgeLabel = isFail ? "FAIL" : isWarn ? "PASS WITH ISSUES" : "PASS";
 
   return (
-    <div className={`report-card ${passed ? "report-pass" : "report-fail"}`}>
+    <div className={`report-card ${cardClass}`}>
       <div className="report-header">
-        <span className={`report-badge ${passed ? "report-badge-pass" : "report-badge-fail"}`}>
-          {passed ? <CheckCircle2 size={12} aria-hidden="true" /> : <XCircle size={12} aria-hidden="true" />}
-          {passed ? "PASS" : "FAIL"}
+        <span className={`report-badge ${badgeClass}`}>
+          {badgeIcon}
+          {badgeLabel}
         </span>
         <span className="report-provider">{PROVIDER_LABELS[result.provider]}</span>
         <span className="report-time">{(result.total_duration_ms / 1000).toFixed(1)}s total</span>
@@ -91,7 +154,72 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
         </p>
       </div>
 
-      {!passed && report && report.findings.length > 0 && (
+      {metrics && metrics.actions_attempted > 0 && (
+        <div className="report-section">
+          <h4 className="report-section-title">Test Execution Summary</h4>
+          <div className="report-summary-row">
+            <DonutChart
+              centerLabel="Actions passed"
+              segments={[
+                { label: "Passed", value: metrics.actions_succeeded, color: "var(--status-good)" },
+                { label: "Failed", value: metrics.actions_attempted - metrics.actions_succeeded, color: "var(--status-critical)" },
+              ]}
+            />
+            <dl className="report-summary-stats">
+              <div>
+                <dt>Total test steps</dt>
+                <dd>{plan.steps.length}</dd>
+              </div>
+              <div>
+                <dt>Steps covered</dt>
+                <dd>
+                  {metrics.steps_covered}/{metrics.steps_planned}
+                </dd>
+              </div>
+              <div>
+                <dt>Actions attempted</dt>
+                <dd>{metrics.actions_attempted}</dd>
+              </div>
+              <div>
+                <dt>Pass rate</dt>
+                <dd>{Math.round(metrics.accuracy_ratio * 100)}%</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+      )}
+
+      {plan.steps.length > 0 && (
+        <div className="report-section">
+          <h4 className="report-section-title">Test Case Execution Details</h4>
+          <div className="report-steps-table-wrap">
+            <table className="report-steps-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Test Step</th>
+                  <th>Status</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody>
+                {buildStepRows(plan, exploration).map((row, i) => (
+                  <tr key={i}>
+                    <td>{i + 1}</td>
+                    <td>{row.step}</td>
+                    <td>
+                      <span className={`step-status ${STEP_STATUS_CLASS[row.status]}`}>{row.status}</span>
+                    </td>
+                    <td className="report-steps-note">{row.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {!isPass && report && report.findings.length > 0 && (
         <div className="report-section">
           <h4 className="report-section-title">Findings</h4>
           <div className="report-findings">
@@ -99,11 +227,14 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
               <div className={`finding-block finding-${finding.severity}`} key={i}>
                 <span className="finding-severity">{finding.severity.toUpperCase()}</span>
                 <p className="finding-line">
-                  <strong>Failed step:</strong> {exploration?.error ?? finding.reproduction_steps.at(-1) ?? "n/a"}
+                  <strong>{isFail ? "Failed step:" : "Note:"}</strong>{" "}
+                  {isFail ? (exploration?.error ?? finding.reproduction_steps.at(-1) ?? "n/a") : finding.summary}
                 </p>
-                <p className="finding-line">
-                  <strong>Failure reason:</strong> {finding.summary}
-                </p>
+                {isFail && (
+                  <p className="finding-line">
+                    <strong>Failure reason:</strong> {finding.summary}
+                  </p>
+                )}
                 {finding.error_message && (
                   <p className="finding-line">
                     <strong>Error message:</strong> {finding.error_message}
@@ -115,7 +246,7 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
         </div>
       )}
 
-      {passed && (
+      {isPass && (
         <div className="report-section">
           <p className="report-summary">
             <CheckCircle2 size={14} aria-hidden="true" className="report-line-icon" />
@@ -166,10 +297,19 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
             <ul className="report-actions-list">
               {exploration.actions.map((action, i) => (
                 <li key={i} className={action.success ? "action-success" : "action-fail"}>
-                  <span className="action-step">{action.step}</span>: {action.action}
-                  {action.selector ? ` on ${action.selector}` : ""}
-                  {action.value ? ` with ${JSON.stringify(action.value)}` : ""}
-                  {!action.success && action.error ? ` — ${action.error}` : ""}
+                  {action.screenshot_path && (
+                    <img
+                      className="action-thumb"
+                      src={`${API_BASE_URL}${action.screenshot_path}`}
+                      alt={`${action.action} on ${action.step}`}
+                    />
+                  )}
+                  <span className="action-text">
+                    <span className="action-step">{action.step}</span>: {action.action}
+                    {action.selector ? ` on ${action.selector}` : ""}
+                    {action.value ? ` with ${JSON.stringify(action.value)}` : ""}
+                    {!action.success && action.error ? ` — ${action.error}` : ""}
+                  </span>
                 </li>
               ))}
             </ul>

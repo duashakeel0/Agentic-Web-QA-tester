@@ -20,7 +20,7 @@ class _FakePlanner:
     async def plan(self, ticket_id):
         await asyncio.sleep(0)
         return TestPlan(
-            ticket_id=ticket_id, matched=True, domain="sauce_demo", workflow="login",
+            ticket_id=ticket_id, matched=True, domain="practice_software_testing", workflow="login",
             steps=["Log in"], expected_outcome={"url_contains": "/inventory.html"},
         )
 
@@ -34,8 +34,9 @@ class _FakePlannerUnmatched:
 
 
 class _FakeExplorer:
-    def __init__(self, llm=None):
+    def __init__(self, llm=None, on_action=None):
         self.llm = llm
+        self.on_action = on_action
         self.browser = _FakeBrowser()
 
     async def explore(self, plan, close_browser=True):
@@ -144,9 +145,58 @@ async def test_run_pipeline_emits_events_in_order():
     ]
 
 
+async def test_run_pipeline_routes_action_events_by_kind(monkeypatch):
+    # The Explorer tags each on_action call "action" (discrete, goes in the
+    # report/filmstrip) or "frame" (a background live-view tick, purely
+    # visual) - the pipeline's wrapper must turn that into the WS event's
+    # own "type" so the two render differently on the dashboard, and must
+    # still default to "action" for a caller that omits "kind" altogether
+    # (older/other callers of the same callback shape).
+    class _ExplorerThatEmitsFrames:
+        def __init__(self, llm=None, on_action=None):
+            self.llm = llm
+            self.on_action = on_action
+            self.browser = _FakeBrowser()
+
+        async def explore(self, plan, close_browser=True):
+            await self.on_action({"kind": "frame", "screenshot_url": "/screenshots/actions/live.png", "viewport": None})
+            await self.on_action(
+                {
+                    "kind": "action",
+                    "step": "s",
+                    "action": "click",
+                    "selector": "#x",
+                    "value": None,
+                    "success": True,
+                    "error": None,
+                    "screenshot_url": "/screenshots/actions/a.png",
+                    "target_box": None,
+                    "viewport": None,
+                }
+            )
+            await self.on_action({"screenshot_url": "/screenshots/actions/no-kind.png", "viewport": None})
+            return ExplorationResult(
+                ticket_id=plan.ticket_id, domain=plan.domain, workflow=plan.workflow,
+                completed=True, actions=[], final_url="https://x/inventory.html", final_page_text="Products",
+            )
+
+    monkeypatch.setattr(pipeline, "ExplorerAgent", _ExplorerThatEmitsFrames)
+    events = []
+
+    async def on_event(event):
+        events.append(event)
+
+    await pipeline.run_pipeline("T1", "claude", on_event=on_event)
+
+    action_events = [e for e in events if "screenshot_url" in e]
+    assert [e["type"] for e in action_events] == ["frame", "action", "action"]
+    assert action_events[0]["screenshot_url"] == "/screenshots/actions/live.png"
+    assert "kind" not in action_events[0]
+
+
 async def test_run_pipeline_emits_stage_error_and_reraises(monkeypatch):
     class _BrokenExplorer:
-        def __init__(self, llm=None):
+        def __init__(self, llm=None, on_action=None):
             self.browser = _FakeBrowser()
 
         async def explore(self, plan, close_browser=True):
@@ -194,3 +244,22 @@ async def test_compare_flags_disagreement_and_missed_steps(monkeypatch):
 def test_make_llm_rejects_unknown_provider():
     with pytest.raises(ValueError, match="Unknown model provider"):
         _real_make_llm("gpt4")
+
+
+def test_make_llm_defaults_ollama_slot_to_local(monkeypatch):
+    from app.agents.ollama_client import OllamaLLMClient
+
+    monkeypatch.delenv("OLLAMA_BACKEND", raising=False)
+    assert isinstance(_real_make_llm("ollama"), OllamaLLMClient)
+
+
+def test_make_llm_routes_ollama_slot_to_groq_when_opted_in(monkeypatch):
+    from app.agents.groq_client import GroqLLMClient
+
+    monkeypatch.setenv("OLLAMA_BACKEND", "groq")
+    monkeypatch.setenv("GROQ_API_KEY", "test-key")
+    llm = _real_make_llm("ollama")
+    assert isinstance(llm, GroqLLMClient)
+    # Same provider label as local Ollama - every downstream report/stat/UI
+    # path only knows "claude"/"ollama", not a distinct "groq" concept.
+    assert llm.provider == "ollama"

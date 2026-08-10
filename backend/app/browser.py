@@ -37,6 +37,16 @@ class BrowserSession:
                 self._playwright.chromium.launch(**launch_kwargs), timeout=STARTUP_TIMEOUT_SECONDS
             )
             self._page = await self._browser.new_page()
+            # Playwright auto-dismisses (cancels) any alert/confirm/prompt
+            # dialog with no listener - some real sites (e.g. Automation
+            # Exercise's Contact Us form) submit via a JS confirm() before
+            # proceeding, so an unhandled dialog silently cancels the
+            # submission: the click itself still reports success, but the
+            # page never reaches its actual result, and a real assertion
+            # ends up failing for a reason that has nothing to do with the
+            # workflow being wrong. Auto-accepting is the closest match to
+            # what a real user clicking "OK" would do.
+            self._page.on("dialog", lambda dialog: asyncio.ensure_future(dialog.accept()))
         except asyncio.TimeoutError as exc:
             raise RuntimeError(
                 f"Browser failed to start within {STARTUP_TIMEOUT_SECONDS:.0f}s - "

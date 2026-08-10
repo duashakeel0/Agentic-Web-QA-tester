@@ -1,9 +1,10 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   BarChart3,
   ChevronsLeft,
   ChevronsRight,
+  Database,
   GitCompare,
   History,
   LayoutDashboard,
@@ -14,9 +15,10 @@ import {
   ShieldCheck,
   Sun,
 } from "lucide-react";
-import GlobalChat from "../components/GlobalChat";
 import { useAuth } from "../contexts/AuthContext";
 import { useAppTheme } from "../hooks/useAppTheme";
+import { apiGet } from "../services/api";
+import type { SiteStats } from "../types/history";
 import "./DashboardLayout.css";
 
 const NAV_ITEMS = [
@@ -25,6 +27,7 @@ const NAV_ITEMS = [
   { to: "/history", label: "Test History", icon: History },
   { to: "/compare", label: "Model Comparison", icon: GitCompare },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/domain-knowledge", label: "Domain Knowledge", icon: Database },
 ];
 
 // Not literal server health - these agents are functions, not long-running
@@ -45,6 +48,16 @@ function DashboardLayout({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_COLLAPSE_KEY) === "1");
+  const [siteStats, setSiteStats] = useState<SiteStats[]>([]);
+
+  useEffect(() => {
+    // Best-effort - a stale/expired token here just leaves the sidebar
+    // widget empty rather than forcing a logout; the page's own data
+    // fetch (if any) already owns that flow.
+    apiGet<SiteStats[]>("/api/history/site-stats")
+      .then(setSiteStats)
+      .catch(() => {});
+  }, []);
 
   function toggleCollapsed() {
     setCollapsed((prev) => {
@@ -88,6 +101,20 @@ function DashboardLayout({ children }: { children: ReactNode }) {
             </NavLink>
           ))}
         </nav>
+
+        {siteStats.length > 0 && (
+          <div className="sidebar-site-stats">
+            <div className="agent-status-header">
+              <span className="sidebar-section-label">Sites Tested</span>
+            </div>
+            {siteStats.slice(0, 5).map((site) => (
+              <div className="site-stats-row" key={site.domain} title={`${site.domain} - tested ${site.run_count} time(s)`}>
+                <span className="site-stats-name">{site.domain}</span>
+                <span className="site-stats-count">{site.run_count}×</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="sidebar-agent-status">
           <div className="agent-status-header">
@@ -163,8 +190,6 @@ function DashboardLayout({ children }: { children: ReactNode }) {
         </header>
         <main className="dashboard-content">{children}</main>
       </div>
-
-      <GlobalChat />
     </div>
   );
 }

@@ -11,15 +11,18 @@ def store(tmp_path):
     return HistoryStore(db_path=str(tmp_path / "history.db"))
 
 
-def _result(ticket_id, provider, verdict, matched=True, findings=0, cost=0.01, coverage=1.0, accuracy=1.0, missed=None):
+def _result(
+    ticket_id, provider, verdict, matched=True, findings=0, cost=0.01, coverage=1.0, accuracy=1.0, missed=None,
+    domain="practice_software_testing",
+):
     verification = VerifierResult(
-        ticket_id=ticket_id, domain="sauce_demo", workflow="login", verdict=verdict,
+        ticket_id=ticket_id, domain=domain, workflow="login", verdict=verdict,
         assertion_checked={}, initial_check_passed=(verdict == "pass"), retried=False,
     ) if matched else None
     report = Report(
         ticket_id=ticket_id,
         findings=[
-            Finding(ticket_id=ticket_id, domain="sauce_demo", workflow="login", severity="high",
+            Finding(ticket_id=ticket_id, domain=domain, workflow="login", severity="high",
                      summary="broke", reproduction_steps=[])
             for _ in range(findings)
         ],
@@ -31,7 +34,7 @@ def _result(ticket_id, provider, verdict, matched=True, findings=0, cost=0.01, c
     )
     return PipelineResult(
         ticket_id=ticket_id, provider=provider,
-        plan=TestPlan(ticket_id=ticket_id, matched=matched, domain="sauce_demo" if matched else None,
+        plan=TestPlan(ticket_id=ticket_id, matched=matched, domain=domain if matched else None,
                        workflow="login" if matched else None, steps=["a", "b", "c"] if matched else []),
         verification=verification, report=report, metrics=metrics,
         started_at=0.0, finished_at=0.05, total_duration_ms=50.0,
@@ -146,6 +149,29 @@ async def test_daily_stats_buckets_by_day(store):
     assert daily[0].passed == 1
     assert daily[0].failed == 1
     assert daily[0].total_cost_usd == pytest.approx(0.01)
+
+
+async def test_site_stats_counts_runs_per_website(store):
+    await store.record_run(_result("T1", "claude", "pass", domain="practice_software_testing"))
+    await store.record_run(_result("T2", "ollama", "fail", domain="practice_software_testing"))
+    await store.record_run(_result("T3", "claude", "pass", domain="parabank"))
+    await store.record_run(_result("T4", "claude", "pass", matched=False))  # unmatched - no domain, excluded
+
+    stats = await store.site_stats()
+    by_domain = {s.domain: s for s in stats}
+
+    assert set(by_domain) == {"practice_software_testing", "parabank"}
+    assert by_domain["practice_software_testing"].run_count == 2
+    assert by_domain["practice_software_testing"].passed == 1
+    assert by_domain["practice_software_testing"].failed == 1
+    assert by_domain["parabank"].run_count == 1
+    assert by_domain["parabank"].passed == 1
+    # Most-tested site first.
+    assert stats[0].domain == "practice_software_testing"
+
+
+async def test_site_stats_empty_when_no_runs(store):
+    assert await store.site_stats() == []
 
 
 async def test_migration_adds_cost_column_to_pre_existing_database(tmp_path):

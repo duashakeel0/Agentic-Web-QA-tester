@@ -7,6 +7,7 @@ one final blob.
 """
 
 import json
+import os
 import sys
 
 if sys.platform == "win32":
@@ -23,6 +24,7 @@ if sys.platform == "win32":
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.agents.claude_client import ClaudeLLMClient
@@ -30,7 +32,17 @@ from app.agents.llm_client import LLMError
 from app.agents.pipeline import run_both, run_pipeline
 from app.auth import AuthError, login as auth_login, logout as auth_logout, require_auth, require_auth_ws
 from app.browser import BrowserSession
-from app.history.schema import ComparisonHistoryEntry, DailyStat, HistoryDetail, HistoryEntry, HistoryStats, ProviderStats
+from app.domains.manifest import load_domains, save_workflow, slugify
+from app.domains.schema import Domain, ExpectedOutcome, Workflow
+from app.history.schema import (
+    ComparisonHistoryEntry,
+    DailyStat,
+    HistoryDetail,
+    HistoryEntry,
+    HistoryStats,
+    ProviderStats,
+    SiteStats,
+)
 from app.history.store import HistoryStore
 from app.pdf_report import generate_report_pdf
 
@@ -45,6 +57,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Live-run and report screenshots (explorer.py's per-action captures,
+# verifier.py's failure captures) - reports/ is gitignored, so a fresh
+# checkout won't have this directory yet; StaticFiles requires it to exist
+# up front.
+SCREENSHOTS_DIR = "reports/screenshots"
+os.makedirs(SCREENSHOTS_DIR, exist_ok=True)
+app.mount("/screenshots", StaticFiles(directory=SCREENSHOTS_DIR), name="screenshots")
 
 
 class LoginRequest(BaseModel):
@@ -150,8 +170,10 @@ VALID_MODELS = ("claude", "ollama", "both")
 async def run_pipeline_ws(websocket: WebSocket, token: str = Depends(require_auth_ws)) -> None:
     """Client sends {"ticket_id": "...", "model": "claude"|"ollama"|"both"}
     once, then receives a stream of stage_start/stage_end/stage_error events
-    as the pipeline runs, followed by one pipeline_done per provider and
-    (for "both") one comparison_done. Connect as /ws/pipeline?token=<token>
+    as the pipeline runs (plus one "action" event per Explorer browser
+    action - a screenshot_url/target_box/viewport for a live view), followed
+    by one pipeline_done per provider and (for "both") one comparison_done.
+    Connect as /ws/pipeline?token=<token>
     from login - the WebSocket API can't set an Authorization header."""
     await websocket.accept()
     try:
@@ -266,6 +288,13 @@ async def daily_stats(days: int = 7, _token: str = Depends(require_auth)) -> lis
     return await history.daily_stats(days=days)
 
 
+@app.get("/api/history/site-stats", response_model=list[SiteStats])
+async def site_stats(_token: str = Depends(require_auth)) -> list[SiteStats]:
+    """How many times each registered website has actually been tested -
+    the sidebar's "tested N times" summary."""
+    return await history.site_stats()
+
+
 @app.get("/api/history/{run_id}", response_model=HistoryDetail)
 async def get_history_entry(run_id: int, _token: str = Depends(require_auth)) -> HistoryDetail:
     entry = await history.get_run(run_id)
@@ -331,6 +360,63 @@ Answer in 2-4 plain sentences, no other text.
     return AskResponse(answer=response.text)
 
 
+@app.get("/api/domains", response_model=list[Domain])
+async def list_domains(_token: str = Depends(require_auth)) -> list[Domain]:
+    """Everything the Planner/Explorer/Verifier can currently test against -
+    what the dashboard's Domain Knowledge page shows before you add to it."""
+    return load_domains()
+
+
+class WorkflowIn(BaseModel):
+    name: str
+    steps: list[str]
+    url_contains: str | None = None
+    text_contains: str | None = None
+
+
+class DomainKnowledgeIn(BaseModel):
+    domain: str
+    base_url: str = ""  # only required when domain is new - ignored for an existing one
+    workflow: WorkflowIn
+
+
+@app.post("/api/domains", response_model=Domain)
+async def add_domain_knowledge(body: DomainKnowledgeIn, _token: str = Depends(require_auth)) -> Domain:
+    """Adds one workflow to a domain from the dashboard instead of hand-
+    editing a YAML file - the same "no domain knowledge for this target"
+    gap the Planner reports on an unmatched ticket, closed live. Writes
+    straight to the same domain knowledge store the Planner reads, so a
+    ticket can reference what was just added immediately, no restart
+    needed (unlike credentials baked into a workflow's steps at YAML
+    creation time - those still need editing directly)."""
+    if not body.domain.strip():
+        raise HTTPException(status_code=400, detail="Domain name is required.")
+    if not body.workflow.name.strip():
+        raise HTTPException(status_code=400, detail="Workflow name is required.")
+
+    steps = [s.strip() for s in body.workflow.steps if s.strip()]
+    if not steps:
+        raise HTTPException(status_code=400, detail="At least one step is required.")
+
+    url_contains = (body.workflow.url_contains or "").strip() or None
+    text_contains = (body.workflow.text_contains or "").strip() or None
+    if not url_contains and not text_contains:
+        raise HTTPException(
+            status_code=400, detail="Provide at least one of url_contains or text_contains, or nothing can ever verify this workflow."
+        )
+
+    existing = next((d for d in load_domains() if d.name == slugify(body.domain)), None)
+    if existing is None and not body.base_url.strip():
+        raise HTTPException(status_code=400, detail="base_url is required when registering a new domain.")
+
+    workflow = Workflow(
+        name=slugify(body.workflow.name),
+        steps=steps,
+        expected_outcome=ExpectedOutcome(url_contains=url_contains, text_contains=text_contains),
+    )
+    return save_workflow(body.domain, body.base_url, workflow)
+
+
 CHAT_HISTORY_LIMIT = 12  # turns kept in the prompt, not stored server-side
 
 
@@ -346,32 +432,100 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+    # Set only when the assistant detected a clear "run/test this ticket"
+    # request - the frontend uses these to actually start the run through
+    # the same WebSocket pipeline a manual "New Test" submit would, rather
+    # than the chat pretending to run something it can't.
+    action: str | None = None  # "run_ticket" | None
+    ticket_id: str | None = None
+    model: str | None = None  # "claude" | "ollama" | "both"
+
+
+_CHAT_VALID_MODELS = {"claude", "ollama", "both"}
+
+
+def _system_facts_for_chat() -> str:
+    """Real, current facts about this exact system - grounds the
+    assistant's answers about "how does this work" in what's actually
+    true right now (registered domains especially, which change over
+    time) instead of generic AI filler about QA tools in general."""
+    domains = load_domains()
+    domain_lines = "\n".join(f"- {d.name} ({d.base_url}): {', '.join(w.name for w in d.workflows)}" for d in domains)
+    return f"""SentinelQA is a four-agent AI QA testing pipeline:
+- Planner: reads a Trello ticket, matches it against the registered domain/workflow manifest below, builds a test plan.
+- Explorer: drives a real Playwright browser, deciding each next action from the live page state (not a fixed script).
+- Verifier: re-checks a flagged result once before it's accepted as confirmed.
+- Reporter: writes the final report and posts a summary comment back to the originating Trello ticket.
+
+Two LLM providers, split by cost/call-volume: Claude (Anthropic) drives the Planner, Verifier, and
+Reporter's judgment-heavy, low-call-volume work; Llama (via local Ollama or Groq's hosted API) drives
+the Explorer's frequent, low-stakes per-action decisions. The user can run a ticket on Claude, Llama, or
+both side by side (a "Compare Mode" that shows a head-to-head on accuracy, coverage, latency, and cost).
+
+Backend: FastAPI (Python) + SQLite for run history. Frontend: React + TypeScript + Vite. Browser
+automation: Playwright. A WebSocket streams each agent's live status, screenshots, and the final report.
+
+Currently registered domains and workflows (this is the complete, real, current list - nothing else can
+be tested until it's added via the Domain Knowledge page):
+{domain_lines or "(none registered yet)"}
+"""
 
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, _token: str = Depends(require_auth)) -> ChatResponse:
     """A general-purpose assistant, unlike /ask which only answers from one
     run's report - this one can talk about anything, the same way any
-    Claude chat would. Stateless on the backend; the client resends the
-    running conversation each turn."""
+    Claude chat would, AND can start a ticket run when asked in plain
+    language. Stateless on the backend; the client resends the running
+    conversation each turn."""
     try:
         llm = ClaudeLLMClient()
     except LLMError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     transcript = "\n".join(f"{m.role.capitalize()}: {m.content}" for m in body.history[-CHAT_HISTORY_LIMIT:])
-    prompt = f"""You are the assistant built into SentinelQA, an AI-powered QA testing dashboard.
-You can help with anything the user asks, not only QA/testing topics - answer like a
-general-purpose, knowledgeable assistant would.
+    prompt = f"""You are the assistant built into SentinelQA, an AI-powered QA testing dashboard. You can
+help with anything the user asks, not only QA/testing topics, AND you can answer accurately about how
+this exact system works using the real facts below - never invent architecture details not listed here.
+
+{_system_facts_for_chat()}
+
+You can also START a real test run when the user clearly asks to run/test a ticket in plain language
+(e.g. "run ticket ABC123", "test the toolshop login on both models"), as long as they give or clearly
+imply a ticket ID.
 
 {transcript}
 User: {body.message}
 
-Respond directly and conversationally, no preamble like "Sure!" or "Here's the answer:".
+Respond with ONLY a JSON object, no other text, no markdown fences, in exactly one of these two shapes:
+1. Just answering: {{"intent": "chat", "reply": "<conversational answer, no preamble like 'Sure!'>"}}
+2. Starting a run (only when a ticket ID is given or clearly implied): {{"intent": "run_ticket",
+   "ticket_id": "<the ticket id>", "model": "claude"|"ollama"|"both"|null,
+   "reply": "<short confirmation, e.g. 'Starting a Claude run for ticket ABC123 now.'>"}}
+If they ask to run something but give no identifiable ticket ID, use "chat" and ask for it instead.
 """
     try:
-        response = await llm.complete(prompt, max_tokens=600, timeout=25)
+        response = await llm.complete(prompt, max_tokens=400, timeout=25)
     except LLMError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    return ChatResponse(reply=response.text)
+    text = response.text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        # Answered in plain prose instead of the requested JSON shape -
+        # still a perfectly good chat answer, shown directly rather than
+        # failing the whole request over a formatting near-miss.
+        return ChatResponse(reply=response.text.strip())
+
+    if parsed.get("intent") == "run_ticket" and parsed.get("ticket_id"):
+        model = parsed.get("model") if parsed.get("model") in _CHAT_VALID_MODELS else "claude"
+        ticket_id = str(parsed["ticket_id"])
+        return ChatResponse(
+            reply=str(parsed.get("reply") or f"Starting a {model} run for ticket {ticket_id} now."),
+            action="run_ticket",
+            ticket_id=ticket_id,
+            model=model,
+        )
+
+    return ChatResponse(reply=str(parsed.get("reply") or response.text.strip()))

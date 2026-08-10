@@ -66,6 +66,7 @@ class VerifierAgent:
             )
 
         initial_passed = self._check_assertion(expected_outcome, result.final_url, result.final_page_text)
+        error_count = self._count_errors(result)
 
         if initial_passed:
             explanation, status = await self._explain(expected_outcome, result, passed=True)
@@ -73,7 +74,8 @@ class VerifierAgent:
                 ticket_id=result.ticket_id,
                 domain=result.domain,
                 workflow=result.workflow,
-                verdict="pass",
+                verdict=self._verdict_for_pass(error_count),
+                warning_count=error_count,
                 assertion_checked=expected_outcome,
                 initial_check_passed=True,
                 retried=False,
@@ -84,7 +86,7 @@ class VerifierAgent:
         retry_passed, retry_error, screenshot_path = await self._recheck(
             expected_outcome, result.final_url, browser, result.ticket_id, result.domain, result.workflow
         )
-        verdict = "pass" if retry_passed else "fail"
+        verdict = self._verdict_for_pass(error_count) if retry_passed else "fail"
         explanation, status = await self._explain(expected_outcome, result, passed=retry_passed)
 
         return VerifierResult(
@@ -92,6 +94,7 @@ class VerifierAgent:
             domain=result.domain,
             workflow=result.workflow,
             verdict=verdict,
+            warning_count=error_count if retry_passed else 0,
             assertion_checked=expected_outcome,
             initial_check_passed=False,
             retried=True,
@@ -103,12 +106,48 @@ class VerifierAgent:
         )
 
     @staticmethod
+    def _verdict_for_pass(error_count: int) -> str:
+        # The end state is genuinely correct either way - the only question
+        # is whether it got there cleanly. A user shouldn't read "FAILED"
+        # for a run that actually reached the right outcome; a handful of
+        # recovered hiccups along the way is a real signal worth surfacing,
+        # just not one that should read as a broken workflow.
+        return "pass" if error_count == 0 else "pass_with_issues"
+
+    @staticmethod
+    def _count_errors(result: ExplorationResult) -> int:
+        # Deliberate broken-input probes are SUPPOSED to fail - excluded so
+        # intentional negative testing never counts against a clean run.
+        #
+        # action == "unknown" means no real action was ever attempted
+        # against the site at all - it's Explorer's own LLMError catch
+        # (a model call that timed out, returned unparseable JSON, or
+        # omitted a required field), logged as "unknown" precisely because
+        # there was no usable decision to execute. That's a hiccup in our
+        # own agent's decision-making, not evidence the site under test has
+        # a real issue - counting it here conflates the two, and demotes
+        # an otherwise clean pass to pass_with_issues over a resolved
+        # mistake of ours rather than a genuine site-side flake (a real
+        # Playwright timeout/error on an actual click, fill, etc. still
+        # counts, since that's real signal about the application).
+        return sum(
+            1
+            for a in result.actions
+            if not a.success and not a.is_broken_input_attempt and a.action != "unknown"
+        )
+
+    @staticmethod
     def _check_assertion(expected: dict, url: str | None, text: str | None) -> bool:
         url_contains = expected.get("url_contains")
         text_contains = expected.get("text_contains")
         if url_contains and (not url or url_contains not in url):
             return False
-        if text_contains and (not text or text_contains not in text):
+        # Case-insensitive on purpose: a real page's exact capitalization
+        # ("There are no results.") often doesn't match a hand-written
+        # expected_outcome's casing ("No results") even though the
+        # assertion is clearly satisfied - text_contains is checking that
+        # a message appears, not testing capitalization as the bug itself.
+        if text_contains and (not text or text_contains.lower() not in text.lower()):
             return False
         return True
 
@@ -174,11 +213,11 @@ class VerifierAgent:
 
         prompt = self._explanation_prompt(expected, result, passed)
         try:
-            response = await self._llm.complete(prompt, max_tokens=200, timeout=LLM_TIMEOUT_SECONDS)
+            response = await self._llm.complete(prompt, max_tokens=400, timeout=LLM_TIMEOUT_SECONDS)
             return response.text, "ok"
         except LLMError:
             try:
-                response = await self._llm.complete(prompt, max_tokens=200, timeout=LLM_RETRY_TIMEOUT_SECONDS)
+                response = await self._llm.complete(prompt, max_tokens=400, timeout=LLM_RETRY_TIMEOUT_SECONDS)
                 return response.text, "ok"
             except LLMError:
                 return None, "inconclusive"

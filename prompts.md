@@ -193,4 +193,492 @@ Running log of significant AI prompts used to build this project, per the intern
 - `post_summary` retried exactly once on failure (2 total attempts, not more), correctly marked `failed` with the real error attached afterward, and confirmed the local report (all findings, reproduction steps, screenshots) still generates in full even though the write-back never succeeded
 - A severity-classification call that fails/times out defaults to "high" rather than silently dropping or downgrading a real finding, and still triggers its alert
 - Reproduction steps are built only from the real action sequence, excluding the deliberate broken-input attempts logged by the Explorer, so they actually reproduce the confirmed bug rather than the intentional bad-input detour
+
+---
+
+## Domain Knowledge Refresh — Replacing the shallow practice sites with full-workflow ones
+
+**Context:** Mentor feedback: `sauce_demo`, `the_internet`, and the read-only `amazon` add-on were too shallow - single-form widget tests, not the kind of whole, multi-step workflow (login → find something → do something → confirm) the proposal actually describes. Registered domains needed to change without touching the proposal document itself.
+
+**Prompt:** Replace the 3 shallow registered domains with deeper ones while keeping the self-built `campushub` domain untouched: ParaBank (Parasoft's public demo banking app - login, transfer funds, pay a bill), practicesoftwaretesting.com/Toolshop (login, browse + add to cart, contact form), and automationexercise.com (browse + add to cart, contact form) - all sites built specifically for QA automation practice, matching the proposal's own stated selection criteria (Section 7).
+
+**What was generated:**
+- `backend/app/domains/data/parabank.yaml`, `practice_software_testing.yaml`, `automation_exercise.yaml` - new domain files, 2-3 workflows each
+- Removed `sauce_demo.yaml`, `the_internet.yaml`, `amazon.yaml`
+- Updated every test fixture that referenced the removed domain names (`test_domains_manifest.py`, `test_planner.py`, plus fixture-only mentions across the reporter/verifier/pipeline/history-store/PDF-report/functional test suites and the frontend's `ReportCard.test.tsx`) - left `test_explorer.py`'s Sauce Demo/the-internet references alone since those reproduce specific historical bugs against the sites where they actually happened, not domain declarations
+
+**What was checked/modified before accepting:**
+- `load_domains()` loads all 4 new/kept domains correctly with no schema errors
+- Full backend suite (147 tests) and frontend suite (14 tests) pass; `tsc`/`oxlint` clean
+- **Not yet completed, and worth flagging explicitly:** this sandbox's network egress is locked down to an allowlist that excludes these sites, so routes/success text were sourced from web search (each site's own test-case docs, well-known public test suites against them) rather than by loading the live pages directly - confidence is high for automationexercise.com and ParaBank's page-level flow (both extremely well-documented, stable QA-practice targets), lower for exact wording on practicesoftwaretesting.com's cart/checkout copy. ParaBank also has no fixed public login (unlike Sauce Demo) - its `login`/`transfer_funds`/`pay_bill` workflows have placeholder credentials that need a real registered ParaBank account swapped in before they'll pass. All of this needs a real local run to confirm, the same way Day 6/7's Ollama-dependent live verification did.
 - Re-ran the full Day 7 Verifier test suite after adding screenshot capture to confirm nothing regressed
+
+---
+
+## Pass-with-issues verdict
+
+**Context:** A run that reached the correct final state but hit a recoverable error along the way (a field that needed a retry, one action that failed but didn't derail the workflow) was being reported as an outright FAIL - the same category as a run that never got there at all. That conflates "something is genuinely broken" with "it worked, imperfectly," which loses real signal and makes minor hiccups look like blocking bugs.
+
+**Prompt:** Give the Verifier a third verdict - `pass_with_issues` - for exactly the case where the final expected outcome is reached but one or more real (non-broken-input-probe) actions failed on the way there. Wire it through the Reporter (a low-severity informational finding, never an email alert), the Trello comment, the PDF report, and the dashboard (a third amber badge next to PASS/FAIL everywhere a verdict is shown), and count it as a pass for aggregate stats (pass rate, daily chart) since the workflow genuinely completed correctly.
+
+**What was generated:**
+- `backend/app/agents/schema.py` - `VerifierResult.warning_count`, `verdict` now `"pass" | "pass_with_issues" | "fail"`
+- `backend/app/agents/verifier.py` - counts real action failures (excluding deliberate broken-input probes); if the final assertion holds despite them, verdict is `pass_with_issues`, never `fail`
+- `backend/app/agents/reporter.py` - generates a low-severity finding for `pass_with_issues` without an LLM classification call or an alert email; fixed `_render_summary`'s pass/fail split, which previously miscounted anything not exactly "pass" as failed
+- `backend/app/history/store.py`, `backend/app/pdf_report.py` - `pass_with_issues` counts toward the aggregate pass rate; PDF verdict color gets a third (amber) option
+- Frontend: `types/pipeline.ts`/`types/history.ts` get a shared `Verdict` type; `ReportCard`, `Dashboard`, `History`, `ComparisonSummary` all render a third "PASS WITH ISSUES" badge instead of forcing a binary pass/fail
+
+**What was checked/modified before accepting:**
+- New Verifier unit tests: a run with one failed action but a correct final state gets `pass_with_issues`; a deliberate broken-input probe failing does NOT trigger it (still a clean `pass`)
+- New Reporter unit tests: `pass_with_issues` produces exactly one low-severity finding with no LLM call and no alert email; `_render_summary`'s pass/fail counts no longer misclassify it
+- New ReportCard test: a `pass_with_issues` result renders the amber badge, never the FAIL badge
+- Full backend suite (152 tests) and frontend suite (15 tests) pass; `tsc`/`oxlint` clean
+
+---
+
+## Domain knowledge model clarification - goal vs. steps vs. ticket
+
+**Context:** Mid-build, tried collapsing each domain's workflow from a detailed step list down to one autonomous goal sentence, on the read that "the agent should know the steps itself, not be told." Corrected: the proposal's domain knowledge model already has the agent finding the real element for each step itself (Section 5) - what it doesn't do is invent the step *sequence* from nothing. The domain YAML stays the detailed, known-correct flow a human tester would follow (per Section 7, verbatim); a ticket is what tells the Planner *which* registered workflow to run, not a restatement of its steps.
+
+**What was generated:** Reverted the single-goal collapse - `parabank.yaml`, `practice_software_testing.yaml`, `automation_exercise.yaml`, `campushub.yaml` all went back to their detailed step lists, and `explorer.py`'s prompt/`MAX_ACTIONS_PER_STEP` reverted to the original step-at-a-time framing (byte-identical to before the collapse, confirmed via `git diff`).
+
+**What was checked/modified before accepting:** All 4 domains reload correctly with the restored steps; full backend suite (152 tests) passes.
+
+---
+
+## Broader workflow coverage + add domain knowledge from the dashboard
+
+**Context:** Mentor asked for two things: (1) each registered site should have a broad set of workflows ready to go, not just 2-3, so a spot request during the presentation doesn't need new code; (2) when a ticket comes back "no domain knowledge for this target," there should be a way to supply that knowledge from the dashboard instead of hand-editing a YAML file.
+
+**Prompt:** Expand ParaBank/Toolshop/AutomationExercise with realistic additional workflows (bank account services, checkout, negative-test scenarios, footer/category features actually documented on each real site). Build a real "add domain knowledge" feature: a dashboard page that lists every registered domain/workflow and a form to add a new workflow to an existing domain or register a brand-new one - written straight to the same YAML store the Planner reads, usable by a ticket immediately with no restart.
+
+**What was generated:**
+- `parabank.yaml`: +5 workflows (open_new_account, find_transactions, update_contact_info, request_loan, log_out) alongside the existing login/transfer_funds/pay_bill
+- `practice_software_testing.yaml`: +4 workflows (view_product_details, search_no_results, filter_by_category, a full checkout)
+- `automation_exercise.yaml`: +5 workflows (search_products, category_browse, subscribe_to_newsletter, login_invalid_credentials, write_product_review) - all confirmed against the site's own documented test cases
+- `backend/app/domains/manifest.py` - `slugify()` and `save_workflow()`, the write side of the domain knowledge store `load_domains()` already reads: creates a new domain's YAML file or appends/replaces a named workflow in an existing one
+- `backend/app/main.py` - `GET /api/domains` (list everything registered) and `POST /api/domains` (add a workflow), both auth-gated, validating that at least one of url_contains/text_contains is given (otherwise nothing could ever verify the workflow) and that a brand-new domain has a base_url
+- `frontend/src/pages/DomainKnowledge.tsx` - new page: a form (domain name with autocomplete against existing ones, base URL for new domains, workflow name, a dynamic step list, expected outcome) plus a live list of every registered domain and its workflows. New sidebar nav item + route.
+
+**What was checked/modified before accepting:**
+- New unit tests for `slugify`/`save_workflow` (new domain, appending a second workflow, replacing a same-named workflow) and functional tests for both endpoints (success, missing expected_outcome, empty steps, missing base_url on a new domain, unauthenticated) - all against an isolated temp directory, never the real YAML files
+- New frontend tests: the page lists registered domains/workflows correctly, rejects a submission with no url_contains/text_contains, and a real submission posts the right payload and shows the success message
+- Left CampusHub's YAML untouched - couldn't find a CampusHub repo on the connected GitHub account to read its actual routes/features from (only the empty Vite-scaffold `-arbisoft-internship` repo exists there), so didn't invent workflows for functionality that might not exist
+- Full backend suite (163 tests) and frontend suite (18 tests) pass; `tsc`/`oxlint` clean
+- **Not yet completed:** same caveat as the earlier domain swap - the new ParaBank/Toolshop/AutomationExercise workflows are sourced from web search against each site's own docs, not a live page load (this sandbox's egress is locked to an allowlist), so still needs a real local run to confirm before relying on them for the presentation
+
+---
+
+## CampusHub verification + expanded coverage
+
+**Context:** The previous round's entry above flagged that CampusHub's YAML was left untouched because no CampusHub repo could be located to verify against - only an empty Vite scaffold was visible at the time. CampusHub's actual source turned out to live on the `week5-mcp-multiagent` branch of `duashakeel0/-arbisoft-internship`, not on its default branch, which is why it wasn't found earlier.
+
+**Prompt:** Find CampusHub's real source and use it to confirm the existing `campushub.yaml` workflows are accurate, then fill it out with more workflows the same way the other three domains were expanded.
+
+**What was generated:**
+- Read the real CampusHub frontend source directly (`src/routes/AppRoutes.tsx`, `src/pages/Login.tsx`, `Dashboard.tsx`, `MarkAttendance.tsx`, `Students.tsx`, `Register.tsx`, `src/components/AttendanceForm.tsx`, and the relevant TanStack Query hooks) and the Django models/routes backing it, all read-only - no changes were made to the CampusHub repo itself.
+- Confirmed the 3 pre-existing workflows (`student_login`, `mark_attendance`, `view_own_records`) were already 100% accurate against real source - their assertions (`Welcome to CampusHub`, `Attendance marked successfully!`, `Attendance Records`) match the live component text exactly.
+- Added `view_students` (login → `/students` → assert `Manage student records here.`), `edit_attendance_record` (create a record, click Edit, change status, resubmit → assert the confirmed toast `Attendance record updated!`), `delete_attendance_record` (create then delete a record → assert the confirmed toast `Attendance record deleted.`), and `login_invalid_credentials` (wrong username/password → assert `Login failed`).
+- Deliberately did not add an "add student" or "register new account" workflow, for the same reason registration is excluded from `automation_exercise.yaml`: `Student.student_id` and `User.username` are both `unique=True`/unique in the Django models, so a fixed value only succeeds on the first run.
+
+**What was checked/modified before accepting:**
+- Every new assertion is a literal string read directly from CampusHub's source (toast text from the mutation hooks, heading/paragraph text from the page components) - not guessed or inferred, unlike the earlier ParaBank/Toolshop/AutomationExercise round which relied on web search.
+- `load_domains()` loads the updated YAML with no schema errors.
+- Full backend suite (163 tests) and frontend suite (18 tests) still pass - no code changes were needed outside the YAML itself.
+
+---
+
+## True live video feed + fixing missing red/green boxes
+
+**Context:** The live view only updated once per browser action, and actions can be seconds apart while the model "thinks" or a page loads - so it read as an occasionally-refreshing still image, not a live camera. Separately, the red/green highlight box was frequently just missing: `_element_box` matched a selector against the snapshot list by string equality against `#id`/`[name="..."]` only, so any action targeting an element without an id/name, or a selector built any other way (a class, an attribute, Playwright's own `text=` engine), silently got no box at all.
+
+**Prompt:** "also live testing is being done but its picture slike live screenshots, i want video monitoring like live camera showing also red bloakcs around errors are not there" - make the live view continuously update like real video, and fix the missing highlight boxes.
+
+**What was generated:**
+- `backend/app/agents/explorer.py`:
+  - `_element_box` rewritten from a static snapshot-rect lookup into an async instance method that asks Playwright directly - `page.locator(selector).first.bounding_box(timeout=1000)` - for whatever the selector currently resolves to on the live page. Works for any selector shape the model can produce, not just a bare id/name match, and returns `None` cleanly (via `PlaywrightError`) if the element is gone, hidden, or the selector never matched anything.
+  - New `_live_frame_loop()`: a background `asyncio` task that runs for the whole exploration, capturing and emitting a screenshot every `LIVE_FRAME_INTERVAL_S` (0.75s) independent of the model's action loop - the actual "video" - tagged `"kind": "frame"` so it's clearly not a discrete, report-worthy action. Started in `explore()` only when an `on_action` listener is actually attached (no point paying the screenshot IO for a live view nobody's watching), and cancelled in the existing `finally` block alongside the browser close.
+  - `_emit_action`'s events now carry `"kind": "action"` so the two event shapes stay distinguishable downstream.
+- `backend/app/agents/pipeline.py` - `on_action`'s wrapper now reads `event.pop("kind", "action")` and uses it as the WebSocket event's own `"type"`, so `"frame"` and `"action"` arrive as distinct event types on the wire with no new endpoint/plumbing needed.
+- `frontend/src/types/pipeline.ts` - new `"frame"` variant on the `PipelineEvent` union (`screenshot_url`/`viewport` only, no step/action/target_box - it's purely visual).
+- `frontend/src/hooks/usePipelineRun.ts` - a `"frame"` event swaps in the newer screenshot on the current `ActionFrame` (keeping whatever step/selector/box caption the last real action set) without ever touching `frameHistory`, so the filmstrip and the report/PDF's action log stay action-only.
+- `frontend/src/components/LiveBrowserView.tsx` + `.css` - a small pulsing "LIVE" badge in the header (only shown once a frame exists) to make the continuous-feed behavior visible, and a fallback caption ("Streaming the browser session…") for the moment before any real action has landed yet.
+
+**What was checked/modified before accepting:**
+- New Explorer unit tests: `_element_box` now queries a fake `page.locator(...).bounding_box()` and returns `None` for a selector matching nothing (not just a selector-less action); `_live_frame_loop` emits periodically-tagged `"frame"` events with no `step`/`target_box` fields and swallows a broken listener without dying; a full `explore()` run (fake browser, a step monkeypatched to stall for 50ms) proves the background loop actually ticks concurrently with real work and gets cleanly cancelled afterward, not just wired up syntactically.
+- New pipeline unit test: an Explorer that emits both `"kind": "frame"` and `"kind": "action"` events (plus one with no `"kind"` at all, to confirm the default) comes out the WebSocket as the right `"type"` for each.
+- New frontend test (`LiveBrowserView.test.tsx`): a successful action renders a green box, a failed one renders a red box with the error text, a frame with no `target_box` (the live-tick case) renders no box at all, and the LIVE badge only appears once a frame exists.
+- Full backend suite (168 tests, +5) and frontend suite (22 tests, +4) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** needs a real local run against a live site to confirm the 0.75s interval feels genuinely video-like without flooding the WebSocket/UI, and that Playwright's `bounding_box()` behaves the same against real, complex pages as it does against the fake locator in tests.
+
+---
+
+## Longer Ollama timeout + live run surviving navigation
+
+**Context:** Two more real usability bugs. First, Ollama's 180s request timeout was tripping on genuinely slow local hardware mid-run, not just on the "model still loading" case it was sized for. Second, and more disruptive: `Dashboard.tsx` and `RunTest.tsx` each called `usePipelineRun()` themselves, so the WebSocket connection and all live run state (stages, feed, live frames, results) lived inside whichever page component started the run. Navigating to History/Compare/Analytics mid-run unmounted that page, which tore down the socket and threw away every bit of live state - coming back showed a blank dashboard as if no test had ever run, even though the backend run itself was likely still going.
+
+**Prompt:** "upgrade llama timeout so it doesnt timeout, make it 10 minutes maybe" / "when i run a test, and go to any other nav... test got vanishes... fix it in a way, if i might change nav, test still keep running."
+
+**What was generated:**
+- `backend/app/agents/ollama_client.py` - `REQUEST_TIMEOUT_SECONDS` raised from 180 to 600 (10 minutes).
+- `frontend/src/contexts/PipelineRunContext.tsx` (new) - a `PipelineRunProvider` that calls `usePipelineRun()` exactly once and shares it via context, plus a `usePipelineRunContext()` hook (same throws-outside-provider pattern as `AuthContext`).
+- `frontend/src/App.tsx` - `PipelineRunProvider` now wraps `<BrowserRouter>` itself (inside `AuthProvider`, above every `<Route>`), so it's never part of the tree that unmounts on navigation - only the routed page underneath it swaps.
+- `frontend/src/pages/Dashboard.tsx` and `RunTest.tsx` - both switched from `usePipelineRun()` to `usePipelineRunContext()`, so they now read and drive the exact same live run instead of each tracking an independent one (a pre-existing but separate inconsistency - starting a run from one page never used to show up on the other either).
+
+**What was checked/modified before accepting:**
+- New `PipelineRunContext.test.tsx`: a consumer used outside the provider throws the expected error; two consumer trees mounted in sequence under the same still-alive provider (simulating navigating to a different page mid-run, via a `rerender` that swaps children under the identical provider instance) see the exact same live `status`, and only one `WebSocket` ever got opened - proving the connection is genuinely shared and survives what would previously have been a remount, not just that the code compiles.
+- Full backend suite (168 tests) and frontend suite (24 tests, +2) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** same as before - no real Ollama instance or live browser session in this sandbox to confirm a genuinely slow local run now survives past 180s, or that navigating away and back mid-run behaves as expected against the real WebSocket (only a faithful fake was exercised in tests).
+
+---
+
+## Keeping Ollama warm between calls (keep_alive)
+
+**Context:** A real screenshot showed the exact 180s timeout message firing on the Explorer's very first action of a run - the model-load-time case the timeout was already sized to tolerate, not a genuinely stuck request. Raising the timeout (previous entry) stops that from failing the run, but doesn't make Ollama any faster; the actual fix for the underlying slowness is not paying the multi-minute model-load penalty repeatedly in the first place. Ollama's own default unloads a model from memory 5 minutes after its last call - so any gap between actions on a slow step, or between separate demo runs while explaining something to a mentor, was enough to force a full reload on the next call.
+
+**Prompt:** "whats the reason of this, i cant understand / also is there any way to fasten ollama, its so slow / my mentor said it would piss my panel board... can we pls fix it."
+
+**What was generated:** `backend/app/agents/ollama_client.py` now sends `"keep_alive": "30m"` on every `/api/generate` request (configurable via a new `OLLAMA_KEEP_ALIVE` env var, documented in `.env.example`) - tells Ollama to keep the model resident in memory for 30 minutes after each call instead of its 5-minute default, so a normal gap between actions or between tickets during a demo doesn't trigger a reload.
+
+**What was checked/modified before accepting:**
+- New Ollama client unit tests: `keep_alive` is sent with the documented default, and is overridable via `OLLAMA_KEEP_ALIVE`.
+- Full backend suite (170 tests, +2) passes.
+- **Not yet completed, and explained plainly in chat:** `keep_alive` only prevents *repeated* reloads - it can't make the very first call (a cold Ollama server, nothing loaded yet) faster, and it can't speed up per-token generation on slow CPU hardware. For that, the real levers are outside this codebase: pre-warm Ollama once before a demo (`ollama run llama3.1 "hi"`), confirm it's actually using a GPU if one exists (`ollama ps`), or switch `OLLAMA_MODEL` to a smaller/faster model (e.g. `llama3.2:3b`) at the cost of some decision accuracy - a real tradeoff for the user to weigh, not something to change unilaterally.
+
+---
+
+## Switching the default model to llama3.2
+
+**Context:** Asked to check the output of a real `ollama ps` run - it showed `PROCESSOR: 100% CPU` with no GPU listed, running llama3.1 (8B, Q4_K_M). That confirms the earlier "switch to a smaller model" suggestion wasn't a hypothetical - this machine is genuinely compute-bound on CPU, where model size is the single biggest lever on speed. Given the go-ahead ("ok switch if u think if would be faster"), made the change instead of just describing it.
+
+**What was generated:** `backend/app/agents/ollama_client.py`'s `DEFAULT_MODEL` and `.env.example`'s `OLLAMA_MODEL` both changed from `llama3.1` to `llama3.2` (its default tag is the 3B variant - roughly a third the compute per token of the 8B model), with a comment explaining the CPU-bound tradeoff and how to check it (`ollama ps`) and revert (`llama3.1`) if selector-picking accuracy matters more than speed for a given run.
+
+**What was checked/modified before accepting:**
+- No test asserted the specific default model string, so nothing needed updating beyond the constant/env template themselves.
+- Full backend suite (170 tests) still passes.
+- **Not yet completed, and told plainly to the user:** this only takes effect once they run `ollama pull llama3.2` and either remove `OLLAMA_MODEL` from their real local `.env` (not the tracked `.env.example`) or set it to `llama3.2` explicitly - their `ollama ps` output showed llama3.1 already loaded from an existing local `.env`/prior pull, which this code change can't reach or edit. Also genuinely can't verify from this sandbox that 3B is meaningfully faster on their exact hardware or still accurate enough for the harder workflows (ParaBank's multi-field forms especially) - worth a real comparison run before relying on it for the actual presentation.
+
+---
+
+## Skipping a redundant first-step LLM call (llama3.2 hallucinated selector)
+
+**Context:** A real screenshot after switching to llama3.2 showed a new, different failure than the timeout ones - `click on #home` failing with `Timed out waiting for '#home'`. `#home` doesn't exist on ParaBank's page at all; the step was "Navigate to the ParaBank homepage," a navigation-only step whose prompt explicitly says "if already on the right page, respond done, don't interact with anything" - and `explore()` had already `goto()`'d `domain.base_url` (ParaBank's homepage) before this step's first decision was even asked for. llama3.2 ignored the instruction and invented a click anyway. This is exactly the accuracy cost flagged when switching models, showing up for real.
+
+**Prompt:** shown the screenshot, asked "whats the reason of this... its still saying this."
+
+**What was generated:** `backend/app/agents/explorer.py`'s `explore()` now checks, only for the very first step of a workflow: if that step is navigation-only (per the existing `_is_interactive_step`) and the browser's current URL already equals `domain.base_url` (true here, since `goto()` just put it there and nothing else has happened yet), the step is skipped entirely - no model call at all, so there's nothing for the model to hallucinate against. Deliberately narrow: only applies to the first step, and only when the URL genuinely already matches - a later "Navigate to X" step that legitimately needs a click to get there (e.g. following a nav link to a page not yet visited) still goes through the normal model-decides-the-action path untouched.
+
+**What was checked/modified before accepting:**
+- Confirmed against the real, already-fixed regression test for the opposite case (`test_execute_step_reinterprets_navigate_with_selector_as_click`, from Day 6/7's the_internet/dropdown loop fix) that a "Navigate to X" step still executes a real click when the browser *isn't* already at the destination - a first cut at this fix wrongly special-cased every non-interactive-step action inside `_execute_step` itself, which broke exactly that case; caught by the existing test suite before it was accepted, and reverted in favor of the narrower `explore()`-level check.
+- New Explorer tests: the redundant first step (browser already at `domain.base_url`) never reaches `_execute_step` (so never makes an LLM call); a first step where `goto()` landed somewhere else (simulating a redirect) is NOT skipped and still goes through the normal decision path.
+- Full backend suite (172 tests, +2) passes.
+- **Not yet completed:** can't verify against the real live ParaBank page from this sandbox whether `goto()` lands on an URL that string-matches `domain.base_url` *exactly* (a redirect adding a session param, for instance, would silently fall back to the old model-decides behavior rather than break anything) - worth confirming on a real run.
+
+---
+
+## Groq as an alternative Ollama backend
+
+**Context:** Even with the earlier fixes (longer timeout, keep_alive, llama3.2, redundant-step skip), running an LLM on CPU-only local hardware is inherently slower than a cloud API - that's an expected limitation, not a bug, but still a real problem for a live demo. Asked whether Ollama could be connected some other way instead of running on the user's own device.
+
+**Prompt:** "is it possible to connect ollama in any other way rather than running it on my device" - offered two paths (rent a GPU cloud box and point OLLAMA_HOST at it, needing no code; or add a Groq-backed client for genuinely fast hosted inference, needing new code) and asked which. Chose the Groq client.
+
+**What was generated:**
+- `backend/app/agents/groq_client.py` (new) - `GroqLLMClient`, hitting Groq's OpenAI-compatible `/chat/completions` endpoint (Bearer auth, `response_format: json_object` for the same JSON-only contract every prompt in this project relies on). Deliberately kept `provider = "ollama"` rather than introducing a real "groq" provider concept - it's a drop-in backend for the same free/local-model comparison arm, so every existing report/history-stats/frontend path (which only knows "claude" and "ollama") keeps working with zero changes. The actual model name (`llama-3.1-8b-instant` by default) still shows up wherever a run's timings are displayed, so nothing is hidden from the report.
+- `backend/app/agents/pipeline.py`'s `make_llm()` - a new `OLLAMA_BACKEND` env var (default `"local"`) switches the "ollama" slot between `OllamaLLMClient` and `GroqLLMClient` - opt-in only, so nothing changes for anyone who doesn't set it.
+- `.env.example` - documents `OLLAMA_BACKEND`, `GROQ_API_KEY`, `GROQ_MODEL`.
+
+**What was checked/modified before accepting:**
+- New Groq client unit tests (mirroring the Ollama client's own test shape): correct text/token-count parsing, Bearer auth header, JSON-mode request body, missing-API-key error, env-configurable model, HTTP-error/timeout/connection-error/malformed-response all raising a clean `LLMError`.
+- New pipeline test: `make_llm("ollama")` returns the local client by default, and the Groq client only once `OLLAMA_BACKEND=groq` is explicitly set - and confirms the returned client's `provider` is still `"ollama"`, not a new value.
+- Full backend suite (183 tests, +11) passes.
+- **Not yet completed:** no real Groq API key available in this sandbox to verify against Groq's actual live API (only the shape of its documented OpenAI-compatible endpoint) - worth a real run once the user has a free Groq key to confirm both the request/response format and that it's actually meaningfully faster on their hardware.
+
+---
+
+## Loop guard was failing a step that had actually already succeeded
+
+**Context:** After switching to Groq (confirmed genuinely ~10x faster in a real run - 85s total vs. multi-minute local runs), a real report showed a *new* failure: a Toolshop login run failed with "Explorer repeated the same action 3 times on step 'Enter customer@practicesoftwaretesting.com into the Email field' (fill on '#email') - stopping to avoid a loop," at 100% action accuracy. The fill genuinely succeeded every single time (Playwright had no trouble with it) - the model just kept re-issuing the exact same already-successful fill instead of recognizing the step was done and moving on, despite the prompt's history block explicitly saying "do not repeat one that already succeeded." Same accuracy-vs-speed tradeoff as the earlier hallucinated-selector case, different symptom: this time the model wasn't wrong about *what* to do, just failed to recognize *when to stop*.
+
+**Prompt:** shown the report, "speed is 10x better but" [this failure].
+
+**What was generated:** `backend/app/agents/explorer.py`'s `_execute_step` now checks, before the identical-action loop guard: if the model's current decision exactly matches an action that already *succeeded* earlier this step, treat it as implicit "done" instead of re-executing it or letting it count toward the loop guard. This splits what the loop guard used to treat as one case (any repeated identical action = suspicious, fail after 2 repeats) into the two genuinely different situations it actually covers: a step repeatedly *failing* the same way is still a real stuck loop and still raises `ExplorerError` exactly as before; a step repeatedly *re-doing something that already worked* is virtually always the model failing to notice completion, not a real problem, so it now completes gracefully instead of failing the whole exploration over something that was never actually stuck.
+
+**What was checked/modified before accepting:**
+- The existing loop-guard regression test (`test_execute_step_raises_after_repeating_same_action`) turned out to assert the *old*, less correct behavior - it used a fake action that always "succeeds," so under the new logic it would complete gracefully instead of raising. Renamed/updated it to `test_execute_step_raises_after_repeating_same_failing_action` with a genuinely failing fake action, so it still validates the case that actually matters (a truly stuck step) instead of accidentally locking in the bug being fixed.
+- New test (`test_execute_step_completes_when_repeating_an_already_succeeded_action`) reproduces the exact real Toolshop failure - 3 identical successful fills queued, only the first is ever executed, the step completes cleanly rather than raising.
+- Full backend suite (184 tests, +1 net - one renamed/fixed, one new) passes.
+- **Not yet completed:** same as always with model-quality issues - this closes one specific recurring pattern (repeating an already-successful action) but doesn't make the model itself more reliable in general; a different kind of confusion could still surface on a different step shape. Worth another real run to confirm this exact failure is gone and watch for anything new.
+
+---
+
+## Groq's free-tier rate limit
+
+**Context:** After fixing the API-key setup and the already-succeeded loop-guard bug, a real run hit a third, different failure: `Groq returned HTTP 429: Rate limit reached for model llama-3.1-8b-instant... on tokens per minute (TPM): Limit 6000, Used 4757, Requested 3223.` This is a direct, almost funny consequence of the speed fix working: local Ollama was slow enough to naturally pace out the Explorer's rapid per-action calls, but Groq answers almost instantly, so a real run blows through the free tier's per-minute token budget in seconds. The client had no retry logic at all, so hitting this even once failed the whole step (and often the whole exploration) outright - even though Groq's own error message says exactly how long to wait (`try again in 19.8s`).
+
+**Prompt:** shown the report - "everytime its linke with ollama, im so done."
+
+**What was generated:** `backend/app/agents/groq_client.py`'s `complete()` now retries up to `MAX_RATE_LIMIT_RETRIES` (3) times on a 429, waiting however long Groq says to wait (parsed from the `Retry-After` header if present, else the "try again in Xs" text in the error body, plus a small buffer) before retrying - instead of failing on the very first rate-limit hit. Only 429s are retried; every other error (auth, malformed response, genuine timeout) still fails immediately as before.
+
+**What was checked/modified before accepting:**
+- New tests: a 429 followed by a successful retry completes normally and slept the parsed wait time; a persistently rate-limited run still eventually gives up cleanly after the retry budget (not an infinite retry loop against a genuinely exhausted quota); the wait-time parser is tested directly against both the header and the error-body-text cases, plus a sensible fallback when neither is parseable.
+- Fixed an existing test (`test_non_200_response_raises_llmerror`) that happened to use a 429 fixture - switched it to 500 so it still tests the generic non-200 path without accidentally exercising (and being slowed down by) the new retry logic.
+- Full backend suite (188 tests, +6 net) passes.
+- **Not yet completed:** can't verify against Groq's real rate limiter from this sandbox - the retry math (parsing "try again in Xs", waiting that long) is confirmed correct in isolation, but only a real run against a real exhausted quota confirms the whole exploration actually recovers smoothly instead of just failing slower. Also worth the user knowing this is a genuine free-tier ceiling, not a bug to fully eliminate - a workflow with a lot of steps in quick succession could still hit it more than 3 times in a row on a very busy account, at which point the run will fail with a clear rate-limit message rather than hang forever.
+
+---
+
+## Rejecting fill/select/press on a navigation-only step
+
+**Context:** A real Toolshop login run showed the model filling the login email into the page's search bar instead of navigating to /auth/login. The first step, "Navigate to /auth/login," is navigation-only - the prompt explicitly says not to interact with anything for this step. But that destination isn't the site's homepage, so the earlier deterministic skip (which only fires when the step's destination is exactly domain.base_url) didn't apply here; the model had to genuinely decide how to navigate, and instead of a real "navigate" action it typed real text into whatever input the page had. Same underlying instruction-following gap as the earlier hallucinated "#home" click, but this time the model chose "fill" instead of "click," and there was no existing guard against that action type on this step shape.
+
+**Prompt:** "its filling eail in search barr."
+
+**What was generated:** `backend/app/agents/explorer.py`'s `_execute_step` now deterministically rejects "fill"/"select"/"press" whenever the current step is navigation-only, before the action is ever attempted against the real page. This is narrower and safer than the earlier reverted attempt to block *all* non-"done" actions on non-interactive steps (which wrongly broke the case where a "navigate to X" step legitimately needs a click on a link) - fill/select/press specifically can never accomplish "get to a different page" regardless of which element they target, unlike click (can follow a link) or navigate (goes there directly), so rejecting only those two action types is unconditionally correct, not just usually correct. Recorded as a failed attempt (not silently dropped) so the model sees exactly why on its next decision, via the existing action-history block in the prompt.
+
+**What was checked/modified before accepting:**
+- New test reproduces the exact failure: a queued `fill` on a "Navigate to /auth/login" step is rejected without ever reaching Playwright, recorded as a failed action with a clear reason, and the subsequent real `navigate` decision executes normally and completes the step.
+- Confirmed the existing dropdown-click regression test still passes unaffected (it uses "click," which this change never touches).
+- Full backend suite (189 tests, +1) passes.
+- **Not yet completed:** this closes the specific case of fill/select/press being used where only navigate/click ever could work - it doesn't prevent the model from picking the *wrong* selector for a legitimate click/navigate on this step type, which is the same general model-accuracy ceiling flagged repeatedly. Worth another real run to confirm this exact failure is gone.
+
+---
+
+## Rewriting the auth/login step to remove URL-construction ambiguity
+
+**Context:** Belt-and-suspenders on top of the deterministic code fix above. The step read "Navigate to /auth/login" - a relative path, requiring the model to combine it with the domain's base URL itself (inferred from the current page's URL, since it's not stated outright anywhere in the prompt) to build the real "navigate" action's value. That's exactly the kind of small extra reasoning step a fast/weaker model can skip or botch, which is plausibly part of why it reached for the search bar instead in the first place.
+
+**Prompt:** "listen to me write auth/login steps again for ollama, pls make sure everything is correct."
+
+**What was generated:** `backend/app/domains/data/practice_software_testing.yaml` - the `login` and `checkout` workflows' first step changed from "Navigate to /auth/login" to "Navigate to the URL https://practicesoftwaretesting.com/auth/login (a direct page navigation - do not use the search bar or any other field on the page)" - the full absolute URL spelled out directly, plus an explicit reminder of what this step is (and isn't). Kept the literal "Navigate to" prefix at the very start on purpose - `_is_interactive_step()`'s classification (which controls both the nav_hint and the new fill/select/press rejection above) matches on that exact prefix; an earlier draft phrased it "Navigate directly to the URL..." which would have silently broken that classification and made things worse, caught before committing by directly testing `_is_interactive_step()` against the new text.
+
+**What was checked/modified before accepting:**
+- Directly verified `ExplorerAgent._is_interactive_step()` still returns `False` for the new step text before accepting it.
+- `load_domains()` loads the updated YAML with no schema errors.
+- Updated `test_planner.py`'s hardcoded end-to-end assertion (it asserted the real manifest's exact step text, since `PlannerAgent` always calls the real `load_domains()`) to match.
+- Full backend suite (189 tests) passes.
+- **Not yet completed:** left `contact_us`'s "Navigate to /contact" (same relative-path pattern, same theoretical risk) untouched - the user's request was specifically about auth/login; happy to apply the same treatment there and to the other domains' relative-path navigate steps if wanted, but didn't do it unprompted.
+
+---
+
+## Case-sensitive id near-miss (#Email vs. #email)
+
+**Context:** A real run after the previous fix showed genuine progress - it navigated to the login page correctly this time - but then failed the next step: `fill on #Email — Timed out waiting for '#Email'`. The real element's id is (almost certainly) lowercase `email`; the model wrote `#Email`, echoing the capitalization of the step's human-readable label ("the Email field") instead of the actual id it was shown in the snapshot. CSS id selectors are case-sensitive, so a wrong-case guess fails outright even though it's obviously meant to be that exact element - the existing bare-id correction (`_resolve_selector`) didn't catch this because it only fires for a selector with no `#`/`.`/etc prefix at all; `#Email` already "looks like" a real CSS selector so it sailed through unchanged.
+
+**Prompt:** "youve clearly written write this in email field, isk why its nt getting it."
+
+**What was generated:** `_resolve_selector` now also checks any plain `#some-id`-shaped selector (nothing more elaborate - no combinators/attributes/spaces, so it never touches a genuinely complex selector) against the snapshot: if there's no exact-case id match but there IS a case-insensitive one, the selector is corrected to the real casing before Playwright ever sees it.
+
+**What was checked/modified before accepting:**
+- New tests: `#Email` against a snapshot with a real `email` id resolves to `#email`; an exact-case match is left alone; a selector with no case-insensitive match anywhere in the snapshot (nothing to correct it to) is left exactly as given rather than guessed at.
+- Confirmed the existing "leaves a real CSS selector alone" test still passes - a bare-id-shaped selector with no near-miss in the snapshot falls through unchanged, same as before.
+- Full backend suite (192 tests, +3) passes.
+- **Not yet completed:** same general caveat as every accuracy fix so far - this closes one specific, common near-miss (case-only mismatch on an otherwise-correct id), not selector accuracy in general. A completely wrong id, or a case mismatch combined with something else off, would still fail. Worth another real run to see how far through the workflow it gets now.
+
+---
+
+## Redesigning the report to look like a real QA test report
+
+**Context:** After several rounds of chasing model-accuracy bugs (and deciding to move on from Ollama debugging for now), turned to the actual deliverable: the downloadable PDF and on-screen report were functionally complete (verdict, findings, metrics, a couple of charts, screenshots) but read as an ad-hoc data dump rather than a QA report anyone would recognize as one - no step-by-step test case table, no expected-vs-actual block, no pass/fail visual summary, generic section ordering.
+
+**Prompt:** "these reports are so basic, make them exactly how QA testing reports look like, but keep tables charts and graphs in it."
+
+**What was generated:**
+- `backend/app/pdf_report.py` - restructured into standard, numbered QA report sections: (1) Test Information (ticket, module/feature under test, test type, model/agent, timing, cost, overall result), (2) Test Execution Summary (a pass/fail donut chart of actions attempted, alongside a counts table - total/passed/failed/skipped steps, pass rate), (3) Expected vs. Actual Outcome (the workflow's `expected_outcome` rendered in plain English next to the Verifier's actual explanation and result), (4) Summary & Analysis (the existing Claude-written narrative, kept), (5) **Test Case Execution Details** - the core addition: a real step-by-step table (Step #, the exact step text, PASS/FAIL/SKIPPED/NOT REACHED, a short note) built entirely from `plan.steps` cross-referenced against the real action log, not fabricated - a step with zero actions reads "skipped" only if the whole run completed (the deterministic first-step homepage skip from earlier), otherwise "not reached", (6) Quality Metrics (existing bar chart, kept), (7) Defects/Findings (existing table, now with auto-numbered `DEF-001`-style IDs), (8) Stage Timings (kept), (9) Evidence/Screenshots (kept).
+- `frontend/src/components/ReportCard.tsx` - added the same two new sections to the on-screen card: a "Test Execution Summary" reusing the dashboard's own `DonutChart` component (visual consistency, not a new chart style) for actions passed/failed plus a small stats grid, and a real "Test Case Execution Details" `<table>` (Step #/Description/Status/Notes) built by a `buildStepRows()` helper that mirrors the PDF's Python logic exactly, so the on-screen view and the downloaded PDF never disagree about what happened.
+
+**What was checked/modified before accepting:**
+- Rendered a full sample PDF locally (via `Read` on the generated file, which can view a PDF's rendered pages directly) and eyeballed the actual layout, not just "did reportlab throw" - confirmed the numbered sections, table alignment, donut/bar charts, and color-coded statuses all render as intended before calling it done.
+- New backend tests: `_format_expected_outcome` for both-fields/none/empty; `_step_rows` for all four statuses (pass, fail, skipped-because-completed, not-reached-because-incomplete) and confirms deliberate broken-input probes are excluded from step status (never mistaken for a real failed attempt); a full realistic-fixture `build_pdf` smoke test exercising every new section together, not just an empty/minimal run.
+- New frontend tests: the step table renders real step text and computes SKIPPED vs PASS vs FAIL correctly from the action log; the Test Execution Summary donut appears once metrics exist and is absent when they don't (an unmatched/pre-metrics report shouldn't show an empty chart).
+- Full backend suite (198 tests, +6) and frontend suite (28 tests, +4) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** haven't seen this rendered against a real completed run with real screenshots/findings/multiple steps in the actual browser dashboard - the sample PDF and the component tests both use hand-built fixtures, not a live pipeline result.
+
+---
+
+## Mentor-checklist audit + chatbot ticket-launch + per-site test counts
+
+**Context:** Given a long, dense mentor checklist covering nearly every part of the project and asked to check what was actually missing before a sync, rather than take the checklist at face value. Actually verified each contested item against the real codebase (backend coverage run live, E2E test file confirmed to exist, comparison dashboard fields grep'd, Trello comment content read directly, GlobalChat's actual capabilities checked) instead of assuming. Two lines in the same message directly contradicted each other ("remove ollama from Explorer" vs "apply both LLMs... 3 reports") - flagged rather than guessed, and the user confirmed: keep both models, one combined report page is fine as already built.
+
+**What the audit found:** most of the checklist was already genuinely done (91% backend coverage, real E2E test, comparison dashboard already shows a winner-per-metric and missed-steps, Trello comments already include pass/fail/reason/error/summary, ModelSelector already offers Claude/Ollama/Both). Three real, confirmed gaps: no frontend test coverage tooling installed at all, no "tested this site N times" summary, and the chat widget being pure Q&A with no way to actually start a test run.
+
+**Prompt:** "fix AI chatbot, it should run tickets and answer me about the system its built in" / "yes add count summary."
+
+**What was generated:**
+- `frontend/src/App.tsx` - restructured so `GlobalChat` renders as a sibling of `<Routes>` inside `<BrowserRouter>` (a new `AppShell` component), not nested inside `DashboardLayout` (which used to remount per route). Needed because the chat can now navigate the user to the dashboard when it starts a run - without this move, that navigation would have unmounted the chat panel and wiped the conversation, the same bug class `PipelineRunProvider` fixed earlier for the live run itself.
+- `backend/app/main.py`'s `/api/chat` - the model now responds with structured JSON (`intent`: "chat" or "run_ticket", plus `ticket_id`/`model`/`reply` for the latter) instead of free prose, so the endpoint can detect "run ticket ABC123" and return an explicit action for the frontend to act on. Also grounded the prompt in real, current facts about the system (the actual four-agent architecture, real tech stack, and the live registered-domains list pulled from `load_domains()`) instead of generic "AI QA dashboard" filler, so questions about how the system works get accurate answers.
+- `frontend/src/components/GlobalChat.tsx` - on a `run_ticket` response, calls the shared `usePipelineRunContext().start()` (the exact same function a manual "New Test" submit uses) and navigates to `/`, so a run started via chat is a real pipeline run, not a chat pretending to test something.
+- `backend/app/history/schema.py`/`store.py`/`main.py` - new `SiteStats` (domain, run_count, passed, failed, last_tested_at) and `GET /api/history/site-stats`, grouped by domain from the existing `runs` table.
+- `frontend/src/pages/Dashboard.tsx` - a new "Sites Tested" sidebar panel showing each registered site's run count ("N×"), pass/fail split, and last-tested date.
+
+**What was checked/modified before accepting:**
+- New backend tests: chat's run_ticket JSON is parsed and returned as a structured action; a missing ticket_id in that JSON is correctly treated as a plain chat fallback, not a broken run attempt; a plain-prose (non-JSON) response still works via a graceful fallback; the prompt is confirmed to actually contain real registered domain names, not just claim to. New `site_stats` tests at both the store and endpoint level, including that unmatched (domain-less) runs are correctly excluded from the per-site counts.
+- New frontend tests for `GlobalChat`: a plain chat reply never navigates; a `run_ticket` response both opens a real WebSocket (proving the run genuinely started, not just displayed a message) and navigates to `/`; a failed chat request still shows an error. Hit a real jsdom gap along the way (`scrollIntoView` isn't implemented at all in jsdom) - fixed once in the shared test setup rather than per-test, and a real mock-completeness bug (the chat test's `vi.mock` of `services/api` initially omitted `getPipelineSocketUrl`, which `usePipelineRunProvider` also imports from that module - would have made every test relying on `start()` fail opaquely).
+- Full backend suite (206 tests, +8) and frontend suite (31 tests, +3) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** frontend test coverage tooling (`@vitest/coverage-v8`) still isn't installed - flagged in the audit but not yet fixed, since it wasn't part of what was asked for in this round. The chat's ticket-detection is still an LLM call, not a hardcoded parser - a genuinely ambiguous message could still occasionally misfire (treat a real question as a run request or vice versa); no real Claude account was available in this sandbox to verify the actual detection accuracy on live, varied phrasing.
+
+---
+
+## False FAIL verdict + alarming red styling on a deliberate broken-input probe
+
+**Context:** A screenshot of a real `search_no_results` Toolshop run showed both Claude and Ollama's live browser views rendering a red "failed" caption on an action, yet the report card underneath showed contradictory data for the same run: a FAIL badge next to "100% Actions passed / Passed (2) / Failed (0)." Two separate bugs turned out to be stacked on top of each other.
+
+**Prompt:** "both llms giving same error although test passed showing no results / fic it" (with the screenshot).
+
+**What was generated:**
+- `backend/app/agents/verifier.py`'s `_check_assertion` - the actual false-FAIL root cause. `text_contains` matching was case-sensitive, so the workflow YAML's `expected_outcome.text_contains: "No results"` (capital N) never matched the real page's actual text, `"...there are no results."` (lowercase, mid-sentence) - an assertion that was clearly satisfied still failed the whole run. Fixed by lowercasing both sides of the comparison for `text_contains` only; `url_contains` deliberately stays case-sensitive since a URL's exact casing (path segments/slugs) can be meaningful in a way a human-written sentence's capitalization isn't.
+- `backend/app/agents/explorer.py`'s `_emit_action()` - the misleading-red-styling root cause. The already-existing `is_broken_input_attempt` flag was captured correctly on the persisted `ActionLogEntry`, but was never included in the dict sent over the live WebSocket, so the frontend had no way to tell a deliberate "try invalid input first" probe (expected to fail/be rejected by design) apart from a genuine action failure - both rendered identically as a red, alarming "failed" box/caption. Threaded the flag through `_emit_action()`'s emitted event (both call sites: the normal action path and `_attempt_broken_input`'s own call).
+- `frontend/src/types/pipeline.ts` / `usePipelineRun.ts` - carried the new `is_broken_input_attempt` field from the WS event through to `ActionFrame`.
+- `frontend/src/components/LiveBrowserView.tsx` - new `frameTone()` helper returning `"pass" | "fail" | "probe"` (probe takes priority over the raw success flag). A probe frame now renders with a neutral amber `box-probe` outline and a small "Testing invalid input" tag instead of the red `box-fail` styling and error text a real failure gets; the caption never shows the raw error string for a probe either, since failing is the expected/correct outcome, not something to alarm about.
+
+**What was checked/modified before accepting:**
+- New backend tests: `_check_assertion` with a case-mismatched `text_contains` in both directions (capitalized expectation against lowercase real text, and vice versa) now passes, confirmed `url_contains` case sensitivity is unchanged, and confirmed a genuinely absent phrase still fails regardless of case. A normal action's emitted live event now asserted to carry `is_broken_input_attempt: False`; a new dedicated test for `_attempt_broken_input` confirms its emitted live event carries `is_broken_input_attempt: True`, not just the persisted `ActionLogEntry`.
+- New frontend test: a broken-input-probe frame gets `box-probe` (never `box-fail`), shows the "Testing invalid input" tag, and does not get the `live-browser-caption-fail` class the way a real failure does.
+- Full backend suite (211 tests, +5) passes; full frontend suite (32 tests, +1), `tsc --noEmit`, and `oxlint` all clean.
+- **Not yet completed:** only `text_contains` was made case-insensitive - if a workflow's assertion turns out to have a case-sensitivity problem in some other field or a different kind of mismatch (whitespace, punctuation), that's a separate bug to diagnose if/when it shows up on a real run.
+
+---
+
+## Dashboard hero: drop the agent-name chips, fix the "enter a URL" copy
+
+**Context:** The dashboard's welcome header showed four separate pill chips reading "Planner / Explorer / Verifier / Reporter" - internal agent names with no real meaning to someone using the tool, reading as clutter rather than a real status indicator. The welcome copy underneath also said "Enter a URL or connect a Trello ticket to get started," but the Start-a-new-test panel only ever had a Trello ticket ID field - there's no URL input anywhere on the dashboard, so that half of the sentence was simply untrue.
+
+**Prompt:** "remove these agent names from hre , else addd smth else , jo think would make it look more proffessional and nice / also if i can check url here then fine , otherwise remove 'add url' from welcome message" (with a screenshot of the four chips).
+
+**What was generated:**
+- `frontend/src/pages/Dashboard.tsx` - removed `AGENT_READY_ROW` and its four-chip row entirely. Replaced with a single `dash-hero-status` pill: a small pulsing green dot + a shield-check icon + "4 AI agents online" - one real status readout instead of four unexplained internal names, in the same visual language (pill, border, accent color) the page already uses elsewhere (`dash-hero-eyebrow`). Trimmed the welcome paragraph to "Connect a Trello ticket to get started," dropping the "Enter a URL or" clause since there genuinely is no URL field on this page.
+- `frontend/src/pages/Dashboard.css` - replaced `.dash-hero-agent-row`/`.dash-hero-agent-chip`/`.dash-hero-agent-dot` with `.dash-hero-status` (pill styling matching the eyebrow badge) and a `dash-hero-status-pulse` keyframe animation (mirrors the existing "LIVE" dot pulse pattern already used in `LiveBrowserView.css`), respecting `prefers-reduced-motion`.
+
+**What was checked/modified before accepting:**
+- Grepped for any other reference to the removed `AGENT_READY_ROW`/`dash-hero-agent-*` classes - none found, safe to delete outright rather than leave dead CSS.
+- `tsc --noEmit` clean, full frontend suite (32 tests) still passes, `oxlint` clean (only the two pre-existing unrelated warnings).
+- **Not yet completed:** purely a visual/copy change with no new interactive element - didn't add a URL-entry option since one doesn't exist on this page and wasn't asked for, just removed the inaccurate claim that it does.
+
+---
+
+## Explorer steps failing with "Claude's response contained no text content"
+
+**Context:** A real Automation Exercise run (`browse_and_add_to_cart`) showed only 2/4 steps reached and a 33% pass rate on Claude specifically - not an Ollama-only problem, ruling out anything model-provider-specific. The report's finding named the exact error: `Claude's response contained no text content`, repeated until the step exhausted its whole action budget.
+
+**Prompt:** shared the report card directly - "even claude isnt doing t" (referring to the earlier worry that only Ollama was unreliable).
+
+**What was generated:**
+- `backend/app/agents/explorer.py` - `DECISION_MAX_TOKENS` raised from 200 to 600. Root cause: `claude_client.py`'s response parsing already anticipated a non-text block (e.g. reasoning) appearing ahead of the real answer, but 200 tokens left no real headroom for that plus the actual JSON decision - the entire budget was sometimes spent before any text existed, producing this exact error, and because the Explorer retries the *same* step on the *same* tight budget, it reliably failed every one of the 6 allotted attempts in a row instead of just once.
+- `backend/app/agents/claude_client.py` - when no text block is found, the error now names *why* when it's diagnosable: if `stop_reason == "max_tokens"`, the message explicitly says the response was cut off before any text was produced and suggests raising `max_tokens`, instead of just the bare fact with no lead on the cause.
+- `backend/app/agents/verifier.py` - `_explain()`'s two `max_tokens=200` calls (initial + retry) bumped to 400 for the same reason, even though this path already degrades gracefully to `inconclusive` rather than failing the whole run.
+
+**What was checked/modified before accepting:**
+- New tests: a response with only a non-text block and `stop_reason="max_tokens"` raises the enriched "cut off by max_tokens" message; the same response shape with a different `stop_reason` (`end_turn`) does *not* get that hint, confirming it's only shown when actually diagnosable rather than guessed at.
+- Full backend suite (211 tests, +2) passes.
+- **Not yet completed:** this fixes the *symptom* (too little budget, unhelpful error) but the underlying question of exactly why Claude sometimes spends tokens on non-text content before the real answer here is still open - worth another real run to confirm 600 tokens is enough headroom, and worth revisiting if the same error resurfaces even at the higher budget.
+
+---
+
+## A passing workflow reported as FAIL, blamed on an unrelated probe error
+
+**Context:** After the max_tokens fix above, a real Automation Exercise `contact_us` run came back FAIL with 100% of the actual workflow's actions passing (6/6) - the finding's "Error message" read `Claude's response contained no text content`, the same string from the previous round's fix, which made it look like the fix hadn't worked. It had; this was a second, different bug hiding behind the first.
+
+**Prompt:** shared the new report card directly, no further comment needed - the contradiction (100% actions passed, verdict FAIL, an LLM error as the stated cause) was the whole signal.
+
+**What was found (two separate bugs):**
+1. `backend/app/agents/reporter.py`'s `_error_message()` picked the *last failed action's error* as the fallback reason for a finding, with no filter for `is_broken_input_attempt`. The workflow's own deliberate negative-input probe (which is *supposed* to sometimes fail/error, and is correctly excluded from `verification.warning_count` by `verifier.py`'s own `_count_errors`) had itself hit the "no text content" LLM error - and because it was the *last* failed action in the log, its unrelated error got surfaced as the reason a completely different, real assertion failure happened.
+2. `backend/app/browser.py` never handled JS `dialog` events. Automation Exercise's real Contact Us form gates its submission behind a native `confirm()` dialog - Playwright auto-dismisses (cancels) any dialog with no listener, so the Explorer's click on Submit genuinely succeeds but the page never reaches its actual result, and the real "Success!" assertion correctly fails for a reason that has nothing to do with the workflow being wrong.
+
+**What was generated:**
+- `reporter.py`'s `_error_message()` now excludes `is_broken_input_attempt` actions from its fallback, matching `verifier.py`'s existing convention exactly.
+- `browser.py`'s `BrowserSession.start()` now registers a `page.on("dialog", ...)` handler that accepts every dialog - the closest match to what a real user clicking "OK" would do.
+
+**What was checked/modified before accepting:**
+- Couldn't reach automationexercise.com from this sandbox to verify the dialog theory live (network policy blocks general external browsing here) - built a local HTML fixture (`tests/e2e/fixtures/confirm_dialog_form.html`) reproducing the exact same confirm-then-reveal-success pattern instead, and proved it both ways: with the fix reverted, the new e2e test genuinely times out waiting for the success text (confirming the dialog really was blocking it); with the fix in, it passes.
+- New unit tests for `_error_message`: a broken-input-probe-only failure returns `None` (not the probe's own error); a probe failure *alongside* a real failed action still correctly surfaces the real one.
+- Full backend suite (216 tests, +5, including the new real-browser e2e test) passes.
+- **Not yet completed:** the dialog fix is verified against a local fixture reproducing the pattern, not the live site itself, since this sandbox can't reach it - worth confirming on your next real Automation Exercise Contact Us run that the success message now actually appears.
+
+---
+
+## Same misattribution bug, one level broader: a resolved retry blamed for an unrelated failure
+
+**Context:** A real `subscribe_to_newsletter` run showed "Click the subscribe button" as PASS (it took 4 attempts, but did succeed), yet the overall FAIL finding's error message was a truncated, unparseable JSON string from one of the earlier, already-resolved attempts - not the real reason. The Verifier had already written the correct explanation ("Newsletter subscription fails to show the success confirmation message"), but the misattributed error sat right next to it, undermining it.
+
+**Prompt:** "this kinda reports should be test passed but heres the error at testing / dn say test hi fail hogaya" - i.e. don't just accept "the test failed," actually explain why a report showing passing steps still reads as broken.
+
+**What was found:** the previous round's fix only excluded deliberate broken-input probes from `_error_message()`'s fallback - too narrow. The real, general rule: once `exploration.completed` is `True`, *every* step in the log succeeded, including ones that needed a retry - a failed attempt earlier in that step's history is resolved noise by definition, not a cause of anything. The old fallback picked "the last failed action's error" with no regard for whether that action's own step ultimately succeeded, so any transient hiccup along the way (an LLM timeout, a truncated JSON response, anything) could get shown as "the error" for a completely unrelated, real assertion failure discovered afterward.
+
+**What was generated:**
+- `backend/app/agents/reporter.py` - `_error_message()` now returns `None` whenever `exploration.completed` is `True` and there's no `retry_error`/`exploration.error` - the fallback to "last failed action's error" is reserved for when the exploration genuinely never completed (a real `ExplorerError` stopped it), which is the only case where that's actually diagnostic. The `is_broken_input_attempt` exclusion from the previous fix is kept for that narrower, still-real path.
+
+**What was checked/modified before accepting:**
+- The previous round's `test_error_message_still_reports_a_real_failed_action_alongside_a_probe` assumed a scenario (completed exploration with a genuinely unresolved failed action) that can't actually happen in practice - `_execute_step` either resolves a step or raises, setting `completed=False`. Replaced it with two tests matching real behavior: a resolved retry inside a completed exploration now correctly returns `None`; a genuinely incomplete exploration still correctly surfaces its last real failure.
+- New test for the exact reported scenario: a step that needed a retry before succeeding, inside a completed exploration, no longer surfaces that retry's error.
+- Full backend suite (217 tests, +2 net) passes.
+- **Not yet completed:** the underlying JSON-truncation itself (this time in the `reasoning` field) still happens occasionally even at the higher token budget from the previous round - harmless now since the retry loop absorbs it and the step still completes, but worth another bump to `DECISION_MAX_TOKENS` if it keeps costing extra action attempts (this run took 14 model calls / ~$0.12 for a 4-step workflow, higher than it should need).
+
+---
+
+## A successful login immediately undone by a spurious "Log Out" click
+
+**Context:** A real ParaBank login run on Llama (Ollama) showed all 4 steps PASS (100% action accuracy), yet the verdict was FAIL, HIGH, citing "click on text='Log Out'" - a selector never mentioned in the workflow's own steps at all.
+
+**Prompt:** "no keep it here loo we passed all steps but test failed" (with the report).
+
+**What was found:** a genuinely new failure class, not a repeat of the two reporting-attribution bugs from the last two rounds. `_execute_step`'s loop unconditionally calls the model again after every successful action until it says "done" - including after a click that actually navigated to a new page. The real sequence: the login click succeeded and landed on ParaBank's Accounts Overview page; the loop asked the model again anyway, handing it a snapshot of that *new* page's elements (which include a normal "Log Out" link); Llama treated that as something it still needed to click, undoing the login it had just completed. The workflow ended up back at the logged-out homepage - a real, self-inflicted failure, not misreporting.
+
+**What was generated:**
+- `backend/app/agents/explorer.py` - `_execute_step()` now ends a step immediately after a successful `click` action that changed the page's URL, without asking the model again. This is a deterministic check (compares the URL before and after the click), matching the same "don't trust a weaker model to reliably say 'done'" philosophy already used for the redundant-navigate and repeated-action cases earlier in this file.
+- No frontend change needed: `ReportCard.tsx`'s "Failed step" line reads `reproduction_steps.at(-1)` from the real action log - since the erroneous extra click can no longer happen, that log never contains it, and the misleading display is fixed at the source instead of patched at the display layer.
+
+**What was checked/modified before accepting:**
+- New unit test reproducing the exact scenario: a successful click that changes the URL ends the step at one action, even when a second (wrong) decision is already queued and would otherwise be consumed - proving the loop actually stops, not just that the assertion happens to pass.
+- The shared `_FakeBrowser` test fixture's bare `page = object()` had no `.url` - needed one (matching `_fake_snapshot`'s URL, so existing tests' behavior is unchanged) for the new check to even run without crashing every other click-based test.
+- Full backend suite (218 tests, +1) passes, including the real-browser e2e login test, which exercises this exact code path for real (a click that navigates) and still passes.
+- **Not yet completed:** scoped specifically to `click` actions, since `fill`/`select`/`press` steps essentially never cause navigation on their own - if a future workflow has a step needing multiple sequential clicks that each navigate, this would end the step after the first one; none of the current registered workflows are written that way, but worth knowing if one ever is.
+
+---
+
+## A step's PASS/FAIL status read from the wrong action - third instance of the same bug class
+
+**Context:** A real ParaBank Transfer Funds run correctly reached `pass_with_issues` overall (LOW severity, accurate "completed and passed, 1 action needed a retry" summary) - but the per-step table showed step 7 ("Submit the transfer") as **FAIL**, with a truncated, unparseable-JSON string as its note, even though the transfer genuinely succeeded.
+
+**Prompt:** "now again wtf is this" (with the report) - the confusion this time wasn't the overall verdict (that part was correct), it was one specific step row contradicting it.
+
+**What was found:** the real sequence was: the submit click succeeded; the loop queried the model again because the confirmation hadn't rendered in that snapshot yet ("the page still shows the transfer form rather than a conf[irmation]" - visible in the model's own truncated reasoning); that second, redundant decision hit the same JSON-truncation issue as the last two rounds and got logged as a failed action; a third, unlogged decision then recognized "done." Both the frontend's `buildStepRows` (`ReportCard.tsx`) and the PDF's `_step_rows` (`pdf_report.py`) determined a step's status from `stepActions[-1]` - the *last* logged action - which picked the redundant failure over the real success that came before it. This is the same "trust the last logged item instead of the real outcome" bug as the last two rounds, just in a third location.
+
+**What was generated:**
+- `frontend/src/components/ReportCard.tsx`'s `buildStepRows` and `backend/app/pdf_report.py`'s `_step_rows` both now mark a step PASS if *any* of its actions succeeded, FAIL only if *all* of them did - matching what "step completed" actually means, rather than what its last attempt happened to be.
+
+**What was checked/modified before accepting:**
+- New tests in both places for the exact scenario: a step with a successful action followed by an unrelated failed one now reads PASS with the real action count, in both the on-screen card and the PDF generator, keeping them in agreement as intended from the original report redesign.
+- Confirmed the existing "single failed action, no successes" test still correctly reads FAIL - the fix only changes behavior when a real success is mixed in with a later failure, not for a step that never actually succeeded.
+- Full backend suite (219 tests, +1) and frontend suite (33 tests, +1) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** this is the third round fixing a "last logged item ≠ real outcome" bug in a different location (error_message, then error_message again more broadly, now step status) - all three traced back to the same underlying JSON-truncation issue still occasionally happening even at the current token budget. The framing bugs are now fixed everywhere they were found, but the truncation itself is still the thing generating the noise in the first place.
+
+---
+
+## A resolved LLM hiccup shouldn't demote a clean pass to pass_with_issues
+
+**Context:** Direct pushback on the last several rounds' fixes: "cif any action btw 6-7 actions needed a retry doesnt mean test was passes with issues / retry shld made this declaration / fix it." A fair, sharper distinction than what the verdict logic actually made: `pass_with_issues` exists to surface a real hiccup *on the site being tested* (a slow-loading button, a flaky element) - genuine QA signal. But the failures chased over the last three rounds weren't that at all; they were Explorer's own LLM call failing to produce a usable decision (timeout, unparseable JSON, no text content) - a hiccup in our tooling, not evidence of anything wrong with the application under test. Counting that against the verdict conflated the two.
+
+**What was generated:**
+- `backend/app/agents/verifier.py` - `_count_errors()` now also excludes any action logged with `action == "unknown"`, on top of the existing broken-input-probe exclusion. "unknown" is Explorer's own convention for "no real action was ever attempted against the site" - it's set exactly and only in the `LLMError` catch block, when the model call itself failed before there was ever a decision to execute. A genuine site-side failure (a real Playwright timeout/error on an actual click, fill, etc.) still correctly counts - that distinction is what makes this a real fix rather than just hiding warnings.
+
+**What was checked/modified before accepting:**
+- New test: an `action="unknown"` failure (the exact LLM-hiccup shape) no longer demotes the verdict - `pass`, not `pass_with_issues`, `warning_count == 0`.
+- Confirmed the existing `pass_with_issues` test (a real `action="fill"` Playwright failure - a genuine site-side flake) is untouched and still correctly demotes the verdict, proving the fix discriminates between the two rather than suppressing all warnings.
+- Deliberately left the raw "Actions attempted / Pass rate" stats in the report unchanged - those are a technical execution-accuracy stat (fair to include every real attempt, hiccups included), distinct from the verdict, which is specifically a claim about the site's own behavior.
+- Full backend suite (220 tests, +1) passes.
+- **Not yet completed:** doesn't retroactively fix already-generated reports/history - this only changes verdicts for runs going forward from this fix.
+
+---
+
+## A real, silently-skipped required field - not another reporting artifact
+
+**Context:** A real ParaBank Pay Bill run genuinely FAILED (HIGH severity): step 13, "Enter '12345' to verify account number," failed both of its attempts with "Claude's response contained no text content (cut off by max_tokens before any text was produced...)," and the exploration moved straight to steps 14-15 without that required field ever being filled - so ParaBank's own form validation correctly refused the payment and never showed "Bill Payment Complete." Pasted with no extra commentary.
+
+**What was found:** unlike the last three rounds, this is not a misattribution bug - the reported failure is real and the site behaved correctly. The root issue is `DECISION_MAX_TOKENS` (600, from the very first round this phase) still being too tight for Claude under some prompts. The mechanism is worse than just "occasionally needs a retry": under a tight budget, a *short* decision (`{"action":"done",...}`) is far more likely to fit than a *longer* one (`{"action":"fill","selector":...,"value":...,"reasoning":...}`) - the JSON schema itself makes truncation asymmetric. So a truncation doesn't just cost a noisy retry; it can systematically bias the model toward claiming a step is already "done" instead of ever actually performing the fill. That's exactly consistent with step 13 being abandoned rather than eventually completed on retry.
+
+**What was generated:**
+- `backend/app/agents/explorer.py` - `DECISION_MAX_TOKENS` raised from 600 to 1200, with the comment updated to record the asymmetric-truncation theory and the real ParaBank evidence for it, so the reasoning survives the next person who's tempted to lower it back for cost reasons.
+
+**What was checked/modified before accepting:**
+- Grepped for any test hardcoding the old value - none found; this is a pure threshold change with no test fixture to update.
+- Full backend suite (220 tests, no change) passes.
+- **Not yet completed:** this is a budget increase, not a structural fix - the same failure mode is still theoretically possible at 1200 tokens for an unusually verbose response, just far less likely in practice. If it recurs, the next real fix would be more structural (e.g. a strict low-token retry that forces a minimal-field decision) rather than another round of raising the ceiling.

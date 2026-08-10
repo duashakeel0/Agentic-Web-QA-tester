@@ -10,9 +10,9 @@ def planner():
 
 
 async def test_match_domain_returns_parsed_json(planner):
-    planner._llm.queue('{"matched": true, "domain": "sauce_demo", "workflow": "login"}')
+    planner._llm.queue('{"matched": true, "domain": "practice_software_testing", "workflow": "login"}')
     match = await planner._match_domain({"title": "Test login", "description": "desc"})
-    assert match == {"matched": True, "domain": "sauce_demo", "workflow": "login"}
+    assert match == {"matched": True, "domain": "practice_software_testing", "workflow": "login"}
 
 
 async def test_match_domain_unparseable_raises_plannererror(planner):
@@ -26,20 +26,21 @@ async def test_plan_end_to_end_matched(monkeypatch, planner):
         return {"title": "Verify login", "description": "Check the login form works"}
 
     monkeypatch.setattr("app.agents.planner.get_ticket", fake_get_ticket)
-    planner._llm.queue('{"matched": true, "domain": "sauce_demo", "workflow": "login"}')
+    planner._llm.queue('{"matched": true, "domain": "practice_software_testing", "workflow": "login"}')
 
     plan = await planner.plan("TICKET-1")
 
     assert plan.matched is True
-    assert plan.domain == "sauce_demo"
+    assert plan.domain == "practice_software_testing"
     assert plan.workflow == "login"
     assert plan.steps == [
-        "Navigate to saucedemo.com",
-        'Enter "standard_user" into the Username field',
-        'Enter "secret_sauce" into the Password field',
+        "Navigate to the URL https://practicesoftwaretesting.com/auth/login "
+        "(a direct page navigation - do not use the search bar or any other field on the page)",
+        'Enter "customer@practicesoftwaretesting.com" into the Email field',
+        'Enter "welcome01" into the Password field',
         "Click the Login button",
     ]
-    assert plan.expected_outcome == {"url_contains": "/inventory.html", "text_contains": "Products"}
+    assert plan.expected_outcome == {"url_contains": "/account", "text_contains": None}
 
 
 async def test_plan_end_to_end_unmatched(monkeypatch, planner):

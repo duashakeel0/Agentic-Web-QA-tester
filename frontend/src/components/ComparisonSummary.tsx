@@ -1,12 +1,59 @@
-import type { ComparisonReport } from "../types/pipeline";
+import BarList from "./charts/BarList";
+import { API_BASE_URL } from "../config";
+import type { ComparisonReport, PipelineResult } from "../types/pipeline";
 import "./ComparisonSummary.css";
 
-function ComparisonSummary({ comparison }: { comparison: ComparisonReport }) {
+/** The last screenshot captured for a run - a same-point-in-time "final
+ * state" shot, useful for an at-a-glance side-by-side even though each
+ * provider's own report above already has the full action-by-action log. */
+function finalScreenshot(result: PipelineResult | null | undefined): string | null {
+  const actions = result?.exploration?.actions ?? [];
+  for (let i = actions.length - 1; i >= 0; i -= 1) {
+    if (actions[i].screenshot_path) return actions[i].screenshot_path;
+  }
+  return null;
+}
+
+function ComparisonSummary({
+  comparison,
+  claudeResult,
+  ollamaResult,
+}: {
+  comparison: ComparisonReport;
+  claudeResult?: PipelineResult | null;
+  ollamaResult?: PipelineResult | null;
+}) {
+  const claudeShot = finalScreenshot(claudeResult);
+  const ollamaShot = finalScreenshot(ollamaResult);
+
+  const chartItems = [
+    {
+      label: "Claude Coverage",
+      value: Math.round((comparison.claude_metrics?.coverage_ratio ?? 0) * 100),
+      color: "var(--claude-color)",
+    },
+    {
+      label: "Ollama Coverage",
+      value: Math.round((comparison.ollama_metrics?.coverage_ratio ?? 0) * 100),
+      color: "var(--ollama-color)",
+    },
+    {
+      label: "Claude Accuracy",
+      value: Math.round((comparison.claude_metrics?.accuracy_ratio ?? 0) * 100),
+      color: "var(--claude-color)",
+    },
+    {
+      label: "Ollama Accuracy",
+      value: Math.round((comparison.ollama_metrics?.accuracy_ratio ?? 0) * 100),
+      color: "var(--ollama-color)",
+    },
+  ];
+
   const rows: { label: string; claude: string; ollama: string; winner?: "claude" | "ollama" }[] = [
     {
       label: "Verdict",
-      claude: comparison.claude_verdict?.toUpperCase() ?? "n/a",
-      ollama: comparison.ollama_verdict?.toUpperCase() ?? "n/a",
+      claude: comparison.claude_verdict?.replace(/_/g, " ").toUpperCase() ?? "n/a",
+      ollama: comparison.ollama_verdict?.replace(/_/g, " ").toUpperCase() ?? "n/a",
     },
     {
       label: "Time taken",
@@ -42,6 +89,32 @@ function ComparisonSummary({ comparison }: { comparison: ComparisonReport }) {
   return (
     <div className="comparison-summary">
       <h3 className="comparison-title">Claude vs Ollama</h3>
+
+      {(claudeShot || ollamaShot) && (
+        <div className="comparison-screenshots">
+          <div className="comparison-screenshot-block">
+            <span className="comparison-screenshot-label">Claude - final state</span>
+            {claudeShot ? (
+              <img src={`${API_BASE_URL}${claudeShot}`} alt="Claude run - final page state" />
+            ) : (
+              <div className="comparison-screenshot-empty">No screenshot</div>
+            )}
+          </div>
+          <div className="comparison-screenshot-block">
+            <span className="comparison-screenshot-label">Ollama - final state</span>
+            {ollamaShot ? (
+              <img src={`${API_BASE_URL}${ollamaShot}`} alt="Ollama run - final page state" />
+            ) : (
+              <div className="comparison-screenshot-empty">No screenshot</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="comparison-chart">
+        <BarList items={chartItems} />
+      </div>
+
       <div className="comparison-table">
         <div className="comparison-row comparison-head">
           <span />

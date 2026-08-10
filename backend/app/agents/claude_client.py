@@ -52,7 +52,13 @@ class ClaudeLLMClient(LLMClient):
         # find the first block that actually has one instead of assuming.
         text_block = next((block for block in response.content if hasattr(block, "text")), None)
         if text_block is None:
-            raise LLMError("Claude's response contained no text content.")
+            # stop_reason == "max_tokens" here means the whole budget was
+            # spent before any real text was produced (e.g. on internal
+            # reasoning) - naming that explicitly saves a debugging session
+            # next time, instead of just "no text content" with no hint of why.
+            reason = getattr(response, "stop_reason", None)
+            hint = " (cut off by max_tokens before any text was produced - try raising max_tokens)" if reason == "max_tokens" else ""
+            raise LLMError(f"Claude's response contained no text content{hint}.")
 
         finished_at, duration_ms = timed_since(started_monotonic)
         llm_response = LLMResponse(

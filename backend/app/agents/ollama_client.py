@@ -12,13 +12,24 @@ import httpx
 from app.agents.llm_client import LLMClient, LLMError, LLMResponse, timed_since
 
 DEFAULT_HOST = "http://localhost:11434"
-DEFAULT_MODEL = "llama3.1"
+# llama3.2 (3B) rather than llama3.1 (8B): roughly a third the compute per
+# token, which matters a lot on CPU-only inference (confirmed via `ollama
+# ps` showing 100% CPU, no GPU) - meaningfully faster for the same
+# structured JSON action-decision task, at some cost to how reliably a
+# harder page's selector gets picked right on the first try.
+DEFAULT_MODEL = "llama3.2"
 # Generous on purpose: Ollama has to load the full model into memory on its
 # first call (can take well over a minute on a laptop CPU), and every call
 # after that runs on the model but still has no hard upper bound on a slow
 # machine - too short a timeout here reads as "Ollama isn't running" when
 # it's actually just still thinking.
-REQUEST_TIMEOUT_SECONDS = 180.0
+REQUEST_TIMEOUT_SECONDS = 600.0
+# Ollama's own default is 5m - it unloads the model from memory that soon
+# after the last call, so any gap between actions/runs longer than that
+# (a slow step, a pause between demo tickets) pays the full multi-minute
+# load penalty again on the very next call. Sent on every request so the
+# model stays resident well past a normal gap between test runs.
+DEFAULT_KEEP_ALIVE = "30m"
 
 
 class OllamaLLMClient(LLMClient):
@@ -28,6 +39,7 @@ class OllamaLLMClient(LLMClient):
         super().__init__()
         self._host = host or os.environ.get("OLLAMA_HOST", DEFAULT_HOST)
         self.model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_MODEL)
+        self._keep_alive = os.environ.get("OLLAMA_KEEP_ALIVE", DEFAULT_KEEP_ALIVE)
 
     async def complete(self, prompt: str, *, max_tokens: int = 300, timeout: float | None = None) -> LLMResponse:
         request_timeout = timeout if timeout is not None else REQUEST_TIMEOUT_SECONDS
@@ -42,6 +54,7 @@ class OllamaLLMClient(LLMClient):
                         "prompt": prompt,
                         "stream": False,
                         "format": "json",
+                        "keep_alive": self._keep_alive,
                     },
                 )
         except httpx.TimeoutException as exc:

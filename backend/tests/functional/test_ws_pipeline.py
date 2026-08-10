@@ -5,7 +5,7 @@ from app.agents.schema import PipelineResult, TestPlan
 def _fake_result(provider):
     return PipelineResult(
         ticket_id="T1", provider=provider,
-        plan=TestPlan(ticket_id="T1", matched=True, domain="sauce_demo", workflow="login", steps=["a"]),
+        plan=TestPlan(ticket_id="T1", matched=True, domain="practice_software_testing", workflow="login", steps=["a"]),
         started_at=0.0, finished_at=0.05, total_duration_ms=50.0,
     )
 

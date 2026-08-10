@@ -46,6 +46,38 @@ async def test_complete_wraps_api_error():
     assert client.call_count == 0  # no usage recorded on failure
 
 
+async def test_complete_raises_helpful_error_when_no_text_block(monkeypatch):
+    # Reproduces a real production failure: max_tokens was too tight and
+    # Claude's whole budget went to a non-text block (e.g. reasoning) before
+    # any real answer text, leaving content with nothing that has .text -
+    # burns an Explorer step's entire action budget on repeated identical
+    # failures if the error doesn't at least explain why.
+    client = ClaudeLLMClient(api_key="test-key")
+    response = SimpleNamespace(
+        content=[SimpleNamespace(type="thinking")],  # no .text attribute
+        stop_reason="max_tokens",
+        usage=SimpleNamespace(input_tokens=50, output_tokens=10),
+    )
+    client._client.messages.create = AsyncMock(return_value=response)
+
+    with pytest.raises(LLMError, match="cut off by max_tokens"):
+        await client.complete("prompt")
+
+
+async def test_complete_no_text_block_error_omits_hint_for_other_stop_reasons():
+    client = ClaudeLLMClient(api_key="test-key")
+    response = SimpleNamespace(
+        content=[SimpleNamespace(type="thinking")],
+        stop_reason="end_turn",
+        usage=SimpleNamespace(input_tokens=50, output_tokens=10),
+    )
+    client._client.messages.create = AsyncMock(return_value=response)
+
+    with pytest.raises(LLMError) as exc_info:
+        await client.complete("prompt")
+    assert "cut off by max_tokens" not in str(exc_info.value)
+
+
 async def test_complete_times_out(monkeypatch):
     import asyncio
 

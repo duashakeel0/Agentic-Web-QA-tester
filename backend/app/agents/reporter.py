@@ -46,7 +46,15 @@ class ReporterAgent:
         findings: list[Finding] = []
 
         for run in runs:
-            if run.verification.verdict != "fail":
+            verdict = run.verification.verdict
+            if verdict == "pass":
+                continue
+            if verdict == "pass_with_issues":
+                # The end state was genuinely correct - this isn't a bug to
+                # classify, just worth surfacing that it wasn't clean. No
+                # LLM call, no alert; a recovered hiccup on an otherwise
+                # passing run doesn't need either.
+                findings.append(self._minor_issues_finding(run))
                 continue
             finding = await self._classify(run)
             findings.append(finding)
@@ -81,14 +89,47 @@ class ReporterAgent:
         )
 
     @staticmethod
+    def _minor_issues_finding(run: RunResult) -> Finding:
+        exploration, verification = run.exploration, run.verification
+        return Finding(
+            ticket_id=exploration.ticket_id,
+            domain=exploration.domain,
+            workflow=exploration.workflow,
+            severity="low",
+            summary=(
+                f"Workflow completed and passed, but {verification.warning_count} action(s) "
+                "failed or needed a retry along the way."
+            ),
+            error_message=ReporterAgent._error_message(exploration, verification),
+            reproduction_steps=ReporterAgent._reproduction_steps(exploration),
+            screenshot_path=verification.screenshot_path,
+            explanation=verification.explanation,
+        )
+
+    @staticmethod
     def _error_message(exploration: ExplorationResult, verification: VerifierResult) -> str | None:
-        """The most specific underlying error available, distinct from the
-        LLM-written failure reason - a Trello comment should show both."""
+        """The most specific underlying *execution* error available, distinct
+        from the LLM-written failure reason - a Trello comment should show
+        both, but only when there's a real execution error to show."""
         if verification.retry_error:
             return verification.retry_error
         if exploration.error:
             return exploration.error
-        failed_actions = [a for a in exploration.actions if not a.success and a.error]
+        if exploration.completed:
+            # The exploration reached the end of the workflow - every step,
+            # including any that needed a retry along the way, ultimately
+            # succeeded (that's what "completed" means). A transient failed
+            # attempt earlier in the log is resolved noise at that point,
+            # not the reason verification failed - the real reason is
+            # whatever the assertion/explanation above already says. Showing
+            # a stray retry's error here would misattribute a perfectly
+            # normal recovery as if it were the actual cause of the finding.
+            return None
+        # Exploration never reached the end (a genuine ExplorerError stopped
+        # it) - the last real failure (never a deliberate broken-input
+        # probe, which is *supposed* to fail and is unrelated to why
+        # execution actually got stuck) is the most specific info available.
+        failed_actions = [a for a in exploration.actions if not a.success and a.error and not a.is_broken_input_attempt]
         return failed_actions[-1].error if failed_actions else None
 
     @staticmethod
@@ -173,17 +214,26 @@ Respond with ONLY a JSON object, no other text, in exactly this shape:
         failure reason and raw error message - not just a list of bugs
         with no indication of what passed."""
         passed = [r for r in runs if r.verification.verdict == "pass"]
-        failed = [r for r in runs if r.verification.verdict != "pass"]
+        passed_with_issues = [r for r in runs if r.verification.verdict == "pass_with_issues"]
+        failed = [r for r in runs if r.verification.verdict == "fail"]
 
+        overall = "FAIL" if failed else ("PASS WITH ISSUES" if passed_with_issues else "PASS")
         lines = [
-            f"Result: {'FAIL' if failed else 'PASS'}",
-            f"Testing summary: {len(passed)} passed, {len(failed)} failed out of {len(runs)} workflow(s) tested.",
+            f"Result: {overall}",
+            f"Testing summary: {len(passed)} passed, {len(passed_with_issues)} passed with issues, "
+            f"{len(failed)} failed out of {len(runs)} workflow(s) tested.",
             "",
         ]
         for run in passed:
             lines.append(
                 f"[PASS] {run.exploration.domain}/{run.exploration.workflow} - "
                 f"completed in {len(run.exploration.actions)} action(s)."
+            )
+        for run in passed_with_issues:
+            lines.append(
+                f"[PASS WITH ISSUES] {run.exploration.domain}/{run.exploration.workflow} - "
+                f"completed in {len(run.exploration.actions)} action(s), "
+                f"{run.verification.warning_count} recovered error(s) along the way."
             )
 
         if not report.findings:
