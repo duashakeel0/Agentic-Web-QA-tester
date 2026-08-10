@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Fixture Self-Clearing Field</title>
+</head>
+<body>
+  <!-- Simulates a real, observed failure: a JS-heavy form (client-side
+       validation/re-render) that silently resets a field right after it
+       gets filled - Playwright's fill() itself never errors, so without
+       a follow-up read-back, the Explorer would log this as a clean
+       success even though the field ends up empty again. -->
+  <input id="email" type="text" placeholder="Email" />
+
+  <script>
+    // Cleared synchronously (not on a timer) so the test is deterministic
+    // - by the time Playwright's fill() call returns, the value is
+    // already gone, same as the real observed case where the field
+    // reads empty by the time the very next action runs.
+    document.getElementById("email").addEventListener("input", function () {
+      this.value = "";
+    });
+  </script>
+</body>
+</html>

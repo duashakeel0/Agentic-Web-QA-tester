@@ -641,6 +641,27 @@ Respond with ONLY a JSON object, no other text, in exactly this shape:
         try:
             if action == "fill":
                 await page.fill(selector, value or "", timeout=ACTION_TIMEOUT_MS)
+                # fill() succeeding only means the call didn't throw - it
+                # doesn't guarantee the value is still there afterward. A
+                # JS-heavy form (client-side validation clearing/resetting
+                # a field on its own re-render, a stale element reference
+                # from a snapshot taken just before one) can silently
+                # leave the field empty again with no error at all -
+                # confirmed for real on a Toolshop login run where the
+                # email field showed "Email is required" at click time
+                # despite being logged as filled successfully twice in a
+                # row. Reading back what's actually in the field now and
+                # treating a mismatch as a real failure (instead of a
+                # false "success") is what lets the model see this
+                # happened and retry properly, rather than the report
+                # showing every action passed while login silently never
+                # had a real email in it.
+                actual_value = await page.locator(selector).input_value(timeout=ACTION_TIMEOUT_MS)
+                if (value or "") != actual_value:
+                    return False, (
+                        f"Fill on {selector!r} didn't stick - the field now shows {actual_value!r} "
+                        "instead of the value that was set. The page likely reset it after filling."
+                    )
             elif action == "click":
                 await page.click(selector, timeout=ACTION_TIMEOUT_MS)
             elif action == "select":

@@ -842,3 +842,21 @@ Running log of significant AI prompts used to build this project, per the intern
 - New `_step_rows`/`buildStepRows` tests: every action succeeding with an overall "fail" verdict downgrades only the last step to FAIL, both earlier steps stay PASS; a `pass_with_issues` verdict (where the real assertion WAS satisfied) leaves every step alone.
 - Full backend suite (258 tests, +4) and frontend suite (38 tests, +1) pass; `tsc --noEmit` and `oxlint` clean.
 - **Not yet completed:** can't re-run the exact real Toolshop ticket against the live site from this sandbox to confirm login now actually reaches `/account` - the fix is verified at the skip-condition level directly (a first step with a differing literal URL is no longer silently treated as satisfied), not via a fresh end-to-end run against the real page. Worth a real re-run to confirm before relying on it for the demo.
+
+---
+
+## A fill that "succeeded" but the field was empty by click time
+
+**Context:** The navigation fix above worked - both providers' live views confirmed reaching the real `/auth/login` page - but Claude's login still failed to authenticate, and the live screenshot showed why: "Email is required" in red, right at the moment Login was clicked, despite the report showing the email step "Completed successfully in 2 action(s)." Re-ran it once to rule out one-off model variance - identical failure both times, same "2 action(s)" both runs. A deterministic repeat, not noise.
+
+**Prompt:** "re ran it, same email error again."
+
+**What was found:** `_execute_action`'s `fill` branch only ever checked whether Playwright's `page.fill()` call itself raised - it never checked whether the value was still there afterward. A JS-heavy form (client-side validation, a re-render clearing the field, a stale element reference from a snapshot taken just before one) can silently reset a field with no exception at all - `fill()` genuinely succeeds, Playwright has no way to know the page then undid it. Given the deterministic 2-repeat and the exact symptom (empty field, required-validation showing, right at submit time), this fully explains the mystery: the Explorer believed the field was filled because nothing ever threw, while the real page disagreed.
+
+**What was generated:** `backend/app/agents/explorer.py`'s `_execute_action()` now reads the field back (`page.locator(selector).input_value()`) immediately after every `fill`, and treats a value that doesn't match what was set as a real failure - not the `fill()` call throwing, but the *result* being wrong - with a message naming the selector and what it actually shows now, so the model sees this happened and can retry (or the report can honestly show it as a failure) instead of the action log claiming a clean success while the real field silently isn't there.
+
+**What was checked/modified before accepting:**
+- New fixture `tests/e2e/fixtures/self_clearing_field.html` - a real input whose own JS clears itself synchronously on every `input` event, reproducing the "fill succeeds, page undoes it" shape without depending on the live Toolshop site (unreachable from this sandbox) to prove it.
+- New real-browser e2e test (`test_real_browser_catches_a_fill_that_silently_gets_cleared`) - drives a real `BrowserSession`/`ExplorerAgent._execute_action()` against that fixture and confirms the fill is now correctly reported as failed, with a message naming the selector.
+- Full backend suite (259 tests, +1) passes, including the existing real-browser e2e tests (login/dialog fixtures) exercising the same new read-back code path with a normal, non-clearing field, confirming it doesn't false-positive on an ordinary successful fill.
+- **Not yet completed:** the exact reason the real Toolshop field cleared itself (framework re-render vs. probe interaction vs. something else) is still unconfirmed - this fix makes the *symptom* (a fill that doesn't stick) visible and retryable regardless of cause, rather than depending on first diagnosing which of several plausible real-site causes it actually was. Worth a real re-run to confirm the retry now recovers cleanly rather than just failing faster with a clearer message.

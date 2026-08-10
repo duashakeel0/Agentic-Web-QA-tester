@@ -36,6 +36,29 @@ async def test_real_browser_auto_accepts_a_confirm_dialog_on_submit(fixture_serv
         await session.close()
 
 
+async def test_real_browser_catches_a_fill_that_silently_gets_cleared(fixture_server):
+    # Reproduces a real Toolshop login failure: the email field was
+    # logged as filled successfully, but by the time Login was clicked
+    # the page showed "Email is required" - the fill's own JS-side
+    # validation/re-render had silently cleared it afterward, with no
+    # exception for Playwright to ever catch on its own. Without a
+    # read-back check, _execute_action would report this as a clean
+    # success purely because fill() itself didn't throw.
+    session = BrowserSession()
+    await session.start()
+    agent = ExplorerAgent(browser=session, llm=FakeLLM())
+    try:
+        await session.goto(f"{fixture_server}/self_clearing_field.html")
+
+        success, error = await agent._execute_action("fill", "#email", "customer@example.com")
+
+        assert success is False
+        assert "didn't stick" in error
+        assert "#email" in error
+    finally:
+        await session.close()
+
+
 def _plan(base_url_placeholder_domain: str) -> TestPlan:
     return TestPlan(
         ticket_id="E2E-1",
