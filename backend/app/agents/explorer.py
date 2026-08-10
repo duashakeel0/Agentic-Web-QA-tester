@@ -58,10 +58,13 @@ LIVE_FRAME_INTERVAL_S = 0.75
 # that a real element still has time to appear.
 ACTION_TIMEOUT_MS = 5000
 NAVIGATE_TIMEOUT_MS = 15000
-# Decisions are one short JSON object with a one-sentence reasoning field -
-# capping generation this low keeps every one of the many per-action calls
-# fast without truncating a real response.
-DECISION_MAX_TOKENS = 200
+# Decisions are one short JSON object with a one-sentence reasoning field,
+# but 200 was too tight in practice - Claude sometimes spends part of the
+# budget on brief internal reasoning before the actual JSON, which cut the
+# response off with no text content at all and burned the whole action
+# budget on repeated failures for the exact same step. 600 leaves enough
+# headroom for that plus the real answer without materially slowing calls.
+DECISION_MAX_TOKENS = 600
 
 _NAVIGATION_ONLY_PREFIXES = ("navigate to", "wait for")
 # A selector starting with any of these is already a real CSS selector

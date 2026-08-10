@@ -552,3 +552,21 @@ Running log of significant AI prompts used to build this project, per the intern
 - Grepped for any other reference to the removed `AGENT_READY_ROW`/`dash-hero-agent-*` classes - none found, safe to delete outright rather than leave dead CSS.
 - `tsc --noEmit` clean, full frontend suite (32 tests) still passes, `oxlint` clean (only the two pre-existing unrelated warnings).
 - **Not yet completed:** purely a visual/copy change with no new interactive element - didn't add a URL-entry option since one doesn't exist on this page and wasn't asked for, just removed the inaccurate claim that it does.
+
+---
+
+## Explorer steps failing with "Claude's response contained no text content"
+
+**Context:** A real Automation Exercise run (`browse_and_add_to_cart`) showed only 2/4 steps reached and a 33% pass rate on Claude specifically - not an Ollama-only problem, ruling out anything model-provider-specific. The report's finding named the exact error: `Claude's response contained no text content`, repeated until the step exhausted its whole action budget.
+
+**Prompt:** shared the report card directly - "even claude isnt doing t" (referring to the earlier worry that only Ollama was unreliable).
+
+**What was generated:**
+- `backend/app/agents/explorer.py` - `DECISION_MAX_TOKENS` raised from 200 to 600. Root cause: `claude_client.py`'s response parsing already anticipated a non-text block (e.g. reasoning) appearing ahead of the real answer, but 200 tokens left no real headroom for that plus the actual JSON decision - the entire budget was sometimes spent before any text existed, producing this exact error, and because the Explorer retries the *same* step on the *same* tight budget, it reliably failed every one of the 6 allotted attempts in a row instead of just once.
+- `backend/app/agents/claude_client.py` - when no text block is found, the error now names *why* when it's diagnosable: if `stop_reason == "max_tokens"`, the message explicitly says the response was cut off before any text was produced and suggests raising `max_tokens`, instead of just the bare fact with no lead on the cause.
+- `backend/app/agents/verifier.py` - `_explain()`'s two `max_tokens=200` calls (initial + retry) bumped to 400 for the same reason, even though this path already degrades gracefully to `inconclusive` rather than failing the whole run.
+
+**What was checked/modified before accepting:**
+- New tests: a response with only a non-text block and `stop_reason="max_tokens"` raises the enriched "cut off by max_tokens" message; the same response shape with a different `stop_reason` (`end_turn`) does *not* get that hint, confirming it's only shown when actually diagnosable rather than guessed at.
+- Full backend suite (211 tests, +2) passes.
+- **Not yet completed:** this fixes the *symptom* (too little budget, unhelpful error) but the underlying question of exactly why Claude sometimes spends tokens on non-text content before the real answer here is still open - worth another real run to confirm 600 tokens is enough headroom, and worth revisiting if the same error resurfaces even at the higher budget.

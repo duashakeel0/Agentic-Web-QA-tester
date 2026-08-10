@@ -197,11 +197,11 @@ class VerifierAgent:
 
         prompt = self._explanation_prompt(expected, result, passed)
         try:
-            response = await self._llm.complete(prompt, max_tokens=200, timeout=LLM_TIMEOUT_SECONDS)
+            response = await self._llm.complete(prompt, max_tokens=400, timeout=LLM_TIMEOUT_SECONDS)
             return response.text, "ok"
         except LLMError:
             try:
-                response = await self._llm.complete(prompt, max_tokens=200, timeout=LLM_RETRY_TIMEOUT_SECONDS)
+                response = await self._llm.complete(prompt, max_tokens=400, timeout=LLM_RETRY_TIMEOUT_SECONDS)
                 return response.text, "ok"
             except LLMError:
                 return None, "inconclusive"
