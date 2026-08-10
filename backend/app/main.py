@@ -695,6 +695,44 @@ be tested until it's added via the Domain Knowledge page):
 """
 
 
+CHAT_RECENT_RUNS_LIMIT = 5
+
+
+async def _recent_runs_context() -> str:
+    """Real facts (verdict, the Verifier's explanation, and every
+    finding's real summary/error) about the most recent runs - without
+    this, "why did that fail" has nothing grounded to answer from and
+    either declines or has to invent a reason, the same "never guess"
+    problem every other agent in this system already avoids by only
+    ever reporting what it actually observed."""
+    entries = await history.list_runs(limit=CHAT_RECENT_RUNS_LIMIT)
+    if not entries:
+        return "No test runs have been recorded yet."
+
+    lines = []
+    for entry in entries:
+        detail = await history.get_run(entry.id)
+        if detail is None:
+            continue
+        result = detail.result
+        verification = result.get("verification") or {}
+        findings = ((result.get("report") or {}).get("findings")) or []
+        finding_text = "; ".join(
+            f"[{f.get('severity')}] {f.get('summary')}" + (f" (error: {f.get('error_message')})" if f.get("error_message") else "")
+            for f in findings
+        )
+        line = (
+            f"- Run #{entry.id}, ticket {entry.ticket_id} ({entry.domain or '?'}/{entry.workflow or '?'} "
+            f"on {entry.provider}): verdict {entry.verdict or 'n/a'}."
+        )
+        if verification.get("explanation"):
+            line += f" Verifier said: {verification['explanation']!r}."
+        if finding_text:
+            line += f" Findings: {finding_text}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, _token: str = Depends(require_auth)) -> ChatResponse:
     """A general-purpose assistant, unlike /ask which only answers from one
@@ -713,6 +751,14 @@ help with anything the user asks, not only QA/testing topics, AND you can answer
 this exact system works using the real facts below - never invent architecture details not listed here.
 
 {_system_facts_for_chat()}
+
+Most recent test runs, newest first - use this to answer "why did that fail / pass" questions with the
+REAL reason, grounded in what actually happened (the Verifier's explanation and the Reporter's findings
+below), not a generic non-answer. If the user's question is clearly about their most recent run, assume
+they mean the run listed first. Give a direct, short answer (one or two sentences is fine) instead of
+saying you don't have the report in front of you when it's right here. Only say you don't know if
+nothing below actually covers what's asked:
+{await _recent_runs_context()}
 
 You can also START a real test run when the user clearly asks to run/test a ticket in plain language
 (e.g. "run ticket ABC123", "test the toolshop login on both models"), as long as they give or clearly

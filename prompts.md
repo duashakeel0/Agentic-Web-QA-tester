@@ -806,3 +806,19 @@ Running log of significant AI prompts used to build this project, per the intern
 - New test `test_resolve_selector_normalizes_parenless_text_attribute_pattern`, reproducing the exact real ParaBank selector.
 - Full backend suite (253 tests, +1) passes.
 - **Not yet completed:** can't re-run the exact real ParaBank ticket against the user's own Groq setup from this sandbox (network egress blocked, no Groq key here) - the fix is verified at the selector-resolution level directly against the real failing string, not via a fresh end-to-end run against the live site.
+
+---
+
+## The "Ask anything" chatbot couldn't say why a test failed
+
+**Context:** A screenshot showed the dashboard's global chat widget asked "check what the reason llama failed," replying that it didn't have the report contents in front of it and would have to invent an answer - the day-10 `/ws/ask-site` search bar answers grounded questions about a *site*, but this separate, older, general-purpose chat (the "Ask anything" box, `/api/chat`) had no access to run history at all - its prompt only ever contained static architecture facts (registered domains/workflows), never anything about what actually happened in a real run.
+
+**Prompt:** "this shld be fixed too / this chatbot shld tell why test failed, could be one line straight forward anserbut shld tell" (with the screenshot).
+
+**What was generated:** `backend/app/main.py` - new `_recent_runs_context()` pulls the last 5 recorded runs (`history.list_runs()` + `history.get_run()` for each) and formats each one's real verdict, the Verifier's actual explanation, and every finding's real summary/error message into a compact block, injected into `/api/chat`'s prompt right alongside the existing static system facts. The prompt now explicitly tells the model to answer "why did that fail/pass" directly and specifically from this real data - assuming the most recently listed run when the question doesn't name one - instead of declining, and to only say it doesn't know when the real data genuinely doesn't cover the question (never invent).
+
+**What was checked/modified before accepting:**
+- New test reproducing the exact real complaint: records a real `PipelineResult` matching the screenshot's actual ParaBank ticket (`QnhoyKRV`, transfer_funds, the same "stopping to avoid a loop" finding and Verifier explanation from the earlier selector-fix report), asks "its done, now check what the reason llama failed" through `/api/chat`, and asserts the captured prompt actually contains the ticket id, the real finding text, and the Verifier's own explanation - not just that *some* context was added.
+- Confirmed the existing chat tests (grounded-in-real-domains, conversation history, run-ticket intent detection) still pass unchanged - the new context is additive to the prompt, not a replacement for anything already there.
+- Full backend suite (254 tests, +1) passes.
+- **Not yet completed:** capped at the last 5 runs and doesn't try to disambiguate which run the user means beyond "assume the most recent one" - a question about an older or specifically-named run several runs back could still miss if it's fallen out of that window. Same live-verification limitation as the selector fix above (no real Groq/Claude key in this sandbox to confirm the model's actual reply reads naturally, only that the real data reaches its prompt).
