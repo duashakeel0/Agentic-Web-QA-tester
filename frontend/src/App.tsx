@@ -13,6 +13,7 @@ import History from "./pages/History";
 import HistoryReport from "./pages/HistoryReport";
 import LoginPage from "./pages/LoginPage";
 import RunTest from "./pages/RunTest";
+import Scheduler from "./pages/Scheduler";
 
 function ProtectedDashboard({ children }: { children: ReactNode }) {
   return (
@@ -87,6 +88,14 @@ function AppShell() {
           element={
             <ProtectedDashboard>
               <DomainKnowledge />
+            </ProtectedDashboard>
+          }
+        />
+        <Route
+          path="/scheduler"
+          element={
+            <ProtectedDashboard>
+              <Scheduler />
             </ProtectedDashboard>
           }
         />

@@ -8,3 +8,4 @@ httpx==0.28.1
 anthropic==0.120.2
 PyYAML==6.0.3
 reportlab==5.0.0
+apscheduler==3.11.3

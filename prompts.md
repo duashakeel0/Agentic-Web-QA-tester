@@ -682,3 +682,45 @@ Running log of significant AI prompts used to build this project, per the intern
 - Grepped for any test hardcoding the old value - none found; this is a pure threshold change with no test fixture to update.
 - Full backend suite (220 tests, no change) passes.
 - **Not yet completed:** this is a budget increase, not a structural fix - the same failure mode is still theoretically possible at 1200 tokens for an unusually verbose response, just far less likely in practice. If it recurs, the next real fix would be more structural (e.g. a strict low-token retry that forces a minimal-field decision) rather than another round of raising the ceiling.
+
+---
+
+## Day 9 - Scheduled Testing & Simulated Failures
+
+**Context:** The ticket's own acceptance criteria: a small subset of each domain's workflows run unattended on a fixed interval independent of any ticket, an on-demand dashboard trigger reuses the exact same execution path as the scheduled run, and - the part that actually matters - a step gets deliberately broken during development to prove detection works, not just claimed.
+
+**Prompt:** "less apply ticket 9, 10 then will do try agaun / dont miss anth ok ?" with the Day 9 ticket text pasted (Day 10 wasn't pasted, so only Day 9 was scoped this round). The ticket's own acceptance criteria list is internally contradictory - it says "Each of the 6 domains" in one bullet and "Each of the 3 domains" in another, leftover from an earlier draft. The real registered count is 4 (`parabank`, `automation_exercise`, `practice_software_testing`, `campushub`) - applied to all 4, flagged the discrepancy to the user rather than guessing which stale number was intended.
+
+**What was generated:**
+- `backend/app/domains/schema.py` - `Workflow.smoke: bool = False`.
+- All 4 domain YAMLs - 1-2 idempotent, side-effect-free workflows per domain flagged `smoke: true` (parabank: `login`, `find_transactions`; automation_exercise: `search_products`, `category_browse`; practice_software_testing: `login`, `search_no_results`; campushub: `student_login`, `view_own_records`). Deliberately avoided anything that registers a unique record or spends real money/state (e.g. `transfer_funds`, `open_new_account`) since these run unattended with nobody resetting state between cycles.
+- `backend/app/agents/pipeline.py` - extracted `run_plan()` (Explorer -> Verifier -> Reporter for an already-built plan) out of `run_pipeline()`, which now just builds a plan via the Planner and hands it to `run_plan()`. This is what makes "the on-demand trigger reuses the same execution path as the scheduled run" literally true instead of two copies of the same logic that could drift - a scheduled/on-demand smoke run skips the Planner entirely (there's no Trello ticket behind it) and builds its `TestPlan` directly from the domain's own stored workflow, then calls the identical `run_plan()`.
+- `backend/app/scheduler.py` (new) - `SmokeScheduler` wraps an `apscheduler.schedulers.asyncio.AsyncIOScheduler` job (`coalesce=True, max_instances=1` so a slow cycle never overlaps itself) that calls `run_cycle()` on a fixed interval (`SMOKE_INTERVAL_MINUTES` env, default 60) across every domain's smoke-flagged workflows in one tick. `run_now()` calls the exact same `run_cycle()`, just labeled `triggered_by="on_demand"` instead of `"scheduled"`. One workflow raising doesn't take the rest of the cycle down - caught, logged, and surfaced in the cycle's own `errors` list so a broken workflow is visible instead of silently dropped.
+- `backend/app/main.py` - switched from the deprecated `@app.on_event` to a `lifespan` context manager that starts/stops the scheduler (`SKIP_SMOKE_SCHEDULER=1` env for tests/CI, so a unit test run never launches a real background Playwright job as a side effect); added `GET /api/scheduler/status` and `POST /api/scheduler/run-now`.
+- `frontend/src/pages/Scheduler.tsx` + `.css` (new) - status panel (interval, next run, provider, smoke workflows grouped by domain, last cycle's pass/fail counts and any errors, links to each recorded run) plus the "Run Smoke Tests Now" on-demand trigger button; wired into `App.tsx`'s routes and `DashboardLayout.tsx`'s nav.
+- `backend/requirements.txt` - added `apscheduler==3.11.3`.
+
+**Deliberate failure - the actual evidence, not just a claim:**
+- `backend/tests/e2e/fixtures/smoke_search_page.html` (new) - a minimal local fixture: a search box that shows "There are no results found for your search." for an unknown query.
+- `backend/tests/e2e/fixtures/smoke_search_page_broken.html` (new) - the identical page with one line of real, deliberately injected regression: the "no results" branch writes an empty string instead of the message (see its own comment).
+- `backend/tests/e2e/test_scheduler_real_browser.py` (new) - runs the real `SmokeScheduler.run_cycle()` (real `ExplorerAgent`, real `VerifierAgent`, real `ReporterAgent`, real `HistoryStore`, a real Playwright browser against a real local page; only the LLM transport is scripted via `FakeLLM`, same convention as the project's one other real-browser e2e test) twice: once against the correct fixture (asserts `pass_count == 1`), once against the broken one (asserts `fail_count == 1` and a real finding with the right summary).
+- Captured live, once, outside the test itself, to have an actual artifact and not just a passing assertion:
+  ```
+  === SMOKE CYCLE RESULT (deliberately broken fixture) ===
+  triggered_by: scheduled
+  pass_count: 0 fail_count: 1
+  domain/workflow: smoke_fixture_site search_no_results
+  verdict: fail
+  final_page_text: ' Search'
+  finding severity: medium
+  finding summary: Searching for a nonexistent product shows no message at all instead of a No results found notice.
+  finding explanation: The result area never showed the expected no-results message - it stayed empty.
+  ```
+  Reverting the one-line regression and re-running the identical cycle correctly flips it back to `pass_count: 1, fail_count: 0` - the same two outcomes the checked-in test asserts, so this isn't a one-off manual observation, it's reproducible on demand.
+
+**What was checked/modified before accepting:**
+- `backend/tests/unit/test_scheduler.py` (new, 8 tests) - `list_smoke_workflows()` only returns flagged workflows; `_build_plan()` matches the domain's real stored workflow and rejects one that no longer exists; `run_cycle()` runs every smoke workflow across every domain and records to history; `run_now()` produces `triggered_by="on_demand"` through the identical `run_cycle()`; a fail verdict counts as failed; one workflow raising doesn't take the rest of the cycle down.
+- `backend/tests/functional/test_scheduler_endpoints.py` (new, 4 tests) - both endpoints require auth; status only lists smoke-flagged workflows; run-now triggers a cycle (run_plan faked - a functional/API test shouldn't launch a real browser, that's what the e2e file above is for), updates `last_cycle`, and the run is genuinely queryable back through `/api/history/{id}`. Caught and fixed a real wiring gap while writing this: `smoke_scheduler` is a module-level singleton built once with the app's original `HistoryStore`, so the existing `app_history` fixture's rebinding of `main_module.history` for test isolation doesn't reach it on its own - pointed the scheduler's `_history` at the same isolated store explicitly.
+- Full backend suite (234 tests, +12 net) passes; frontend `tsc --noEmit` and `vitest` (33 tests) pass.
+- Confirmed no real network/API keys were required anywhere in this round's own tests - live automated site access from this environment is blocked by network policy, and no Claude/Trello/SMTP credentials are configured here, so the deliberate-failure evidence above had to be produced entirely against a local fixture with a scripted LLM. This wasn't a workaround chosen for convenience - it's the same limitation and the same solution (a local HTTP fixture server, FakeLLM-scripted decisions) already established and documented in an earlier round of this project for the confirm()-dialog fix, applied here at the scheduler level instead of the Explorer level.
+- **Not yet completed:** Day 10 wasn't pasted this round, so it's untouched. The smoke interval (60 min default) and single-provider choice (`claude` default) are both configuration, not hardcoded - not yet exposed as an editable setting from the dashboard itself, only via env vars. `SmokeScheduler` doesn't yet retry a workflow that failed due to a genuine transient issue (e.g. the same LLM-hiccup class fixed earlier this session) before recording it - each smoke run gets exactly the same one-shot treatment a ticket-triggered run gets, nothing scheduler-specific.

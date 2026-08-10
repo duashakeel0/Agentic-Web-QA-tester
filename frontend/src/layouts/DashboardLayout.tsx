@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import {
   BarChart3,
+  CalendarClock,
   ChevronsLeft,
   ChevronsRight,
   Database,
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { to: "/compare", label: "Model Comparison", icon: GitCompare },
   { to: "/analytics", label: "Analytics", icon: BarChart3 },
   { to: "/domain-knowledge", label: "Domain Knowledge", icon: Database },
+  { to: "/scheduler", label: "Scheduler", icon: CalendarClock },
 ];
 
 // Not literal server health - these agents are functions, not long-running

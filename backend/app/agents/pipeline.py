@@ -118,12 +118,9 @@ def _compute_metrics(plan: TestPlan, exploration: ExplorationResult | None, llm:
     )
 
 
-async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | None = None) -> PipelineResult:
-    """Runs the full pipeline with every agent on the same provider."""
-    llm = make_llm(provider)
-    timings: list[StepTiming] = []
-    started_at = time.time()
-
+def _make_timed(
+    llm: LLMClient, timings: list[StepTiming], provider: str, on_event: EventCallback | None
+) -> Callable[[str, Coroutine[None, None, T]], Awaitable[T]]:
     async def timed(agent_name: str, awaitable: Coroutine[None, None, T]) -> T:
         await _emit(on_event, {"type": "stage_start", "provider": provider, "agent": agent_name})
         stage_start_wall = time.time()
@@ -160,13 +157,35 @@ async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | 
         )
         return result
 
-    planner = PlannerAgent(llm=llm)
-    plan = await timed("planner", planner.plan(ticket_id))
+    return timed
+
+
+async def run_plan(
+    plan: TestPlan,
+    provider: str,
+    on_event: EventCallback | None = None,
+    llm: LLMClient | None = None,
+    timings: list[StepTiming] | None = None,
+    started_at: float | None = None,
+) -> PipelineResult:
+    """Runs Explorer -> Verifier -> Reporter for an already-built plan -
+    the part of the pipeline that's identical whether the plan came from
+    the Planner matching a Trello ticket, or was built directly for a
+    scheduled/on-demand smoke workflow with no ticket involved at all.
+    This is what lets a scheduled smoke run and its on-demand dashboard
+    trigger share the exact same execution path instead of two versions
+    of the same logic drifting apart over time - only how `plan` gets
+    built differs between the two callers.
+    """
+    llm = llm or make_llm(provider)
+    timings = timings if timings is not None else []
+    started_at = started_at if started_at is not None else time.time()
+    timed = _make_timed(llm, timings, provider, on_event)
 
     if not plan.matched:
         finished_at = time.time()
         return PipelineResult(
-            ticket_id=ticket_id,
+            ticket_id=plan.ticket_id,
             provider=provider,
             plan=plan,
             timings=timings,
@@ -205,12 +224,12 @@ async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | 
     reporter = ReporterAgent(llm=llm)
     report = await timed(
         "reporter",
-        reporter.report(ticket_id, [RunResult(exploration=exploration, verification=verification)]),
+        reporter.report(plan.ticket_id, [RunResult(exploration=exploration, verification=verification)]),
     )
 
     finished_at = time.time()
     return PipelineResult(
-        ticket_id=ticket_id,
+        ticket_id=plan.ticket_id,
         provider=provider,
         plan=plan,
         exploration=exploration,
@@ -222,6 +241,19 @@ async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | 
         finished_at=finished_at,
         total_duration_ms=(finished_at - started_at) * 1000,
     )
+
+
+async def run_pipeline(ticket_id: str, provider: str, on_event: EventCallback | None = None) -> PipelineResult:
+    """Runs the full pipeline with every agent on the same provider."""
+    llm = make_llm(provider)
+    timings: list[StepTiming] = []
+    started_at = time.time()
+    timed = _make_timed(llm, timings, provider, on_event)
+
+    planner = PlannerAgent(llm=llm)
+    plan = await timed("planner", planner.plan(ticket_id))
+
+    return await run_plan(plan, provider, on_event=on_event, llm=llm, timings=timings, started_at=started_at)
 
 
 async def run_both(

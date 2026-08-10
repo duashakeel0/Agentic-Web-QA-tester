@@ -12,6 +12,7 @@ name: campushub
 base_url: http://localhost:5173
 workflows:
   - name: student_login
+    smoke: true
     steps:
       - Navigate to /login
       - Enter a valid username and password
@@ -28,6 +29,7 @@ workflows:
       text_contains: Attendance marked successfully
 
   - name: view_own_records
+    smoke: true
     steps:
       - Log in with valid credentials
       - Navigate to /attendance

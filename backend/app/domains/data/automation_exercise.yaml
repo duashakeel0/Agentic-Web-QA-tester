@@ -28,6 +28,7 @@ workflows:
       text_contains: Success! Your details have been submitted successfully.
 
   - name: search_products
+    smoke: true
     steps:
       - Navigate to /products
       - Search for "top" using the search bar
@@ -35,6 +36,7 @@ workflows:
       text_contains: SEARCHED PRODUCTS
 
   - name: category_browse
+    smoke: true
     steps:
       - Navigate to the homepage
       - Open the "Women" category from the left sidebar, then the "Dress" subcategory

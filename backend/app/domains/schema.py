@@ -15,6 +15,13 @@ class Workflow(BaseModel):
     name: str
     steps: list[str]
     expected_outcome: ExpectedOutcome
+    # Marks this workflow as part of its domain's small unattended
+    # "smoke" subset - the scheduler runs only these on a fixed interval
+    # to catch regressions, independent of any ticket. Kept small and
+    # deliberately picked for idempotency (safe to run over and over: no
+    # unique-field registration, no fixed-email side effects) since these
+    # run unattended with nobody resetting state between cycles.
+    smoke: bool = False
 
 
 class Domain(BaseModel):

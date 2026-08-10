@@ -13,6 +13,7 @@ name: parabank
 base_url: https://parabank.parasoft.com/parabank/index.htm
 workflows:
   - name: login
+    smoke: true
     steps:
       - Navigate to the ParaBank homepage
       - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
@@ -68,6 +69,7 @@ workflows:
       text_contains: Account Opened!
 
   - name: find_transactions
+    smoke: true
     steps:
       - Navigate to the ParaBank homepage
       - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field

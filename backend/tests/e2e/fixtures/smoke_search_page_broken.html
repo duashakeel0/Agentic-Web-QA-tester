@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Fixture Smoke Search (deliberately broken)</title>
+</head>
+<body>
+  <!-- Same page as smoke_search_page.html, with one real regression
+       injected on purpose: the "no results" message was accidentally
+       typo'd during a refactor, so a search for something that genuinely
+       doesn't exist silently shows nothing instead of the expected
+       message. Used once, live, to prove the Day 9 scheduler actually
+       catches a real regression instead of always reporting "pass" - see
+       prompts.md for the captured evidence. -->
+  <input id="search" type="text" placeholder="Search products" />
+  <button id="search-btn" type="button">Search</button>
+  <div id="result"></div>
+
+  <script>
+    var KNOWN_PRODUCTS = ["pliers", "hammer", "wrench"];
+    document.getElementById("search-btn").addEventListener("click", function () {
+      var query = document.getElementById("search").value.trim().toLowerCase();
+      if (KNOWN_PRODUCTS.indexOf(query) === -1) {
+        document.getElementById("result").textContent = "";
+      } else {
+        document.getElementById("result").textContent = "Found 1 matching product.";
+      }
+    });
+  </script>
+</body>
+</html>

@@ -6,6 +6,7 @@ name: practice_software_testing
 base_url: https://practicesoftwaretesting.com
 workflows:
   - name: login
+    smoke: true
     steps:
       - Navigate to the URL https://practicesoftwaretesting.com/auth/login (a direct page navigation - do not use the search bar or any other field on the page)
       - Enter "customer@practicesoftwaretesting.com" into the Email field
@@ -44,6 +45,7 @@ workflows:
       text_contains: Add to cart
 
   - name: search_no_results
+    smoke: true
     steps:
       - Navigate to the homepage
       - Search for "zzzznonexistentproduct123" using the search bar

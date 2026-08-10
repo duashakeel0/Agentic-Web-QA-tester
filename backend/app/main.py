@@ -9,6 +9,8 @@ one final blob.
 import json
 import os
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 if sys.platform == "win32":
     # The default SelectorEventLoop on Windows can't launch subprocesses
@@ -45,11 +47,26 @@ from app.history.schema import (
 )
 from app.history.store import HistoryStore
 from app.pdf_report import generate_report_pdf
+from app.scheduler import SmokeScheduler, list_smoke_workflows
 
 load_dotenv()
 
-app = FastAPI(title="SentinelQA")
 history = HistoryStore()
+smoke_scheduler = SmokeScheduler(history=history)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # SKIP_SMOKE_SCHEDULER exists for tests/CI - a scheduled job launching
+    # real Playwright browsers against real sites every interval is the
+    # last thing a unit test run should trigger as a side effect.
+    if os.environ.get("SKIP_SMOKE_SCHEDULER", "").lower() not in ("1", "true"):
+        smoke_scheduler.start()
+    yield
+    smoke_scheduler.shutdown()
+
+
+app = FastAPI(title="SentinelQA", lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -415,6 +432,78 @@ async def add_domain_knowledge(body: DomainKnowledgeIn, _token: str = Depends(re
         expected_outcome=ExpectedOutcome(url_contains=url_contains, text_contains=text_contains),
     )
     return save_workflow(body.domain, body.base_url, workflow)
+
+
+class SmokeWorkflowOut(BaseModel):
+    domain: str
+    workflow: str
+
+
+class SmokeCycleErrorOut(BaseModel):
+    domain: str
+    workflow: str
+    error: str
+
+
+class SmokeCycleOut(BaseModel):
+    triggered_by: str
+    provider: str
+    started_at: float
+    finished_at: float
+    pass_count: int
+    fail_count: int
+    run_ids: list[int]
+    errors: list[SmokeCycleErrorOut]
+
+
+class SchedulerStatus(BaseModel):
+    enabled: bool
+    interval_minutes: int
+    provider: str
+    next_run_at: float | None
+    smoke_workflows: list[SmokeWorkflowOut]
+    last_cycle: SmokeCycleOut | None
+
+
+def _cycle_out(cycle) -> SmokeCycleOut | None:
+    if cycle is None:
+        return None
+    return SmokeCycleOut(
+        triggered_by=cycle.triggered_by,
+        provider=cycle.provider,
+        started_at=cycle.started_at,
+        finished_at=cycle.finished_at,
+        pass_count=cycle.pass_count,
+        fail_count=cycle.fail_count,
+        run_ids=cycle.run_ids,
+        errors=[SmokeCycleErrorOut(domain=e.domain, workflow=e.workflow, error=e.error) for e in cycle.errors],
+    )
+
+
+@app.get("/api/scheduler/status", response_model=SchedulerStatus)
+async def scheduler_status(_token: str = Depends(require_auth)) -> SchedulerStatus:
+    """What the dashboard's Scheduler panel shows: the fixed interval this
+    runs on, every domain's smoke-flagged workflows, when the next
+    unattended cycle fires, and the outcome of the last cycle - whichever
+    triggered it, scheduled or on-demand, since both write to the same
+    last_cycle."""
+    return SchedulerStatus(
+        enabled=smoke_scheduler.running,
+        interval_minutes=smoke_scheduler.interval_minutes,
+        provider=smoke_scheduler.provider,
+        next_run_at=smoke_scheduler.next_run_at,
+        smoke_workflows=[SmokeWorkflowOut(domain=r.domain, workflow=r.workflow) for r in list_smoke_workflows()],
+        last_cycle=_cycle_out(smoke_scheduler.last_cycle),
+    )
+
+
+@app.post("/api/scheduler/run-now", response_model=SmokeCycleOut)
+async def scheduler_run_now(_token: str = Depends(require_auth)) -> SmokeCycleOut:
+    """On-demand trigger for the dashboard - calls the exact same
+    run_cycle() a scheduled tick calls, just started by a button instead
+    of the interval timer. Same execution path, different trigger."""
+    cycle = await smoke_scheduler.run_now()
+    return _cycle_out(cycle)
 
 
 CHAT_HISTORY_LIMIT = 12  # turns kept in the prompt, not stored server-side
