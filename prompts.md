@@ -788,3 +788,21 @@ Running log of significant AI prompts used to build this project, per the intern
 - `frontend/src/tests/AskSiteBar.test.tsx` (new, 4 tests) - the search bar renders regardless of run state; a decline shows the "no domain knowledge" message, not a guess; a matched answer shows its domain badge; a just-finished run's real `exploration` data is genuinely what gets sent as `context` for a matching follow-up question (asserted against the exact JSON payload sent over the fake WebSocket, not just that *something* was sent).
 - Full backend suite (252 tests, +18 net) passes; frontend `tsc --noEmit`, `oxlint`, and `vitest` (37 tests, +4) all pass.
 - **Not yet completed:** the "during a run" context path resolves the active provider by picking whichever of claude/ollama has a result or base_url first - genuinely ambiguous for a "both" comparison run (which of the two providers' in-progress context should a question use?), not something this round tried to resolve properly. The search bar also always asks on the `claude` provider regardless of which model a run used - no provider picker on the bar itself yet.
+
+---
+
+## A parenless XPath-text selector variant slipped past the existing fix
+
+**Context:** A real ParaBank transfer_funds run on Groq-hosted Llama genuinely failed: step 5 ("Open the Transfer Funds page from Account Services") timed out and hit the loop guard after 3 identical attempts on `a[text='Transfer Funds']` - HIGH severity, correctly stopped the run, but the underlying cause was a bug, not the model being wrong about what to click.
+
+**Prompt:** pasted the report card, "llama is again nt working in testing wtf."
+
+**What was found:** an existing fix (way earlier this project) already handles the model writing XPath-style text matches instead of real CSS - `a[text()='Dropdown']` gets rewritten to Playwright's `text="Dropdown"`. This run's selector, `a[text='Transfer Funds']`, is a *different* malformed shape - no parens after `text` at all - which `_XPATH_TEXT_PATTERN`'s regex (`text\(\)\s*=...`, parens mandatory) never matched, so it fell straight through to Playwright unresolved and timed out against valid-looking-but-meaningless CSS, on a link that was genuinely present on the page. First attempt at broadening the regex to `text\(\)?\s*=...` still silently failed the exact real case - `\(\)?` only makes the *closing* paren optional while still requiring the opening one, not the "()" pair together; caught by testing the fix directly against the real failing string before accepting it, not just re-running the existing test suite (which wouldn't have caught this, since the old cases still passed).
+
+**What was generated:** `backend/app/agents/explorer.py` - `_XPATH_TEXT_PATTERN` corrected to `text(?:\(\))?\s*=\s*['"]([^'"]+)['"]` (the `()` grouped together as one optional unit), so both `text()='X'` and `text='X'` now resolve to `text="X"`.
+
+**What was checked/modified before accepting:**
+- Verified directly against both real strings (`a[text='Transfer Funds']` and `a[text()='Dropdown']`) via `ExplorerAgent._resolve_selector()` before touching any test file - this is what caught the first, wrong fix attempt.
+- New test `test_resolve_selector_normalizes_parenless_text_attribute_pattern`, reproducing the exact real ParaBank selector.
+- Full backend suite (253 tests, +1) passes.
+- **Not yet completed:** can't re-run the exact real ParaBank ticket against the user's own Groq setup from this sandbox (network egress blocked, no Groq key here) - the fix is verified at the selector-resolution level directly against the real failing string, not via a fresh end-to-end run against the live site.

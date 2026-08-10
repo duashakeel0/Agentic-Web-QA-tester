@@ -81,12 +81,19 @@ _NAVIGATION_ONLY_PREFIXES = ("navigate to", "wait for")
 # A selector starting with any of these is already a real CSS selector
 # (id/class/attribute/combinator) and left alone by _resolve_selector.
 _CSS_SELECTOR_PREFIX_CHARS = ("#", ".", "[", "*", ">", "~", "+", ":")
-# Ollama's Llama 3.1 sometimes writes an XPath-style text match where a CSS
-# selector is expected - a[text()='Dropdown'] or a:contains('Dropdown') -
-# which isn't valid CSS/Playwright syntax and never matches anything. The
-# *intent* (match by visible text) is real, though, and maps directly onto
-# Playwright's own text= selector engine.
-_XPATH_TEXT_PATTERN = re.compile(r"""text\(\)\s*=\s*['"]([^'"]+)['"]""")
+# Llama (both local and Groq-hosted) sometimes writes an XPath-style text
+# match where a CSS selector is expected - a[text()='Dropdown'],
+# a[text='Transfer Funds'] (the ()-less variant, seen for real on a
+# ParaBank run against Groq), or a:contains('Dropdown') - none of which
+# are valid CSS/Playwright syntax and never match anything real, so the
+# click just times out against a genuinely-present element with the
+# wrong selector syntax. The *intent* (match by visible text) is real
+# though, and maps directly onto Playwright's own text= selector engine.
+# "()" is optional here on purpose to catch both variants with one regex -
+# grouped as (?:\(\))? rather than \(\)?, since the latter only makes the
+# closing paren optional while still requiring the opening one, which
+# silently fails to match the ()-less variant this was added for.
+_XPATH_TEXT_PATTERN = re.compile(r"""text(?:\(\))?\s*=\s*['"]([^'"]+)['"]""")
 _CONTAINS_TEXT_PATTERN = re.compile(r"""contains\([^,)]*,?\s*['"]([^'"]+)['"]\s*\)""")
 # Matches only a plain "#some-id" selector - not "#foo .bar", "#foo[x=y]",
 # or anything more elaborate - since only this simple shape is safe to

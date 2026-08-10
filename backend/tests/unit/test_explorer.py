@@ -207,6 +207,16 @@ def test_resolve_selector_normalizes_xpath_text_pattern():
     assert ExplorerAgent._resolve_selector("a:contains('Dropdown')", []) == 'text="Dropdown"'
 
 
+def test_resolve_selector_normalizes_parenless_text_attribute_pattern():
+    # Reproduces a real ParaBank transfer_funds failure on Groq-hosted
+    # Llama: a[text='Transfer Funds'] (no parens after "text", unlike the
+    # a[text()='...'] variant above) - a genuinely different malformed
+    # shape the original regex's mandatory "()" didn't catch, so it fell
+    # through unresolved and the click timed out against valid CSS syntax
+    # that matches nothing real, on a link that was actually on the page.
+    assert ExplorerAgent._resolve_selector("a[text='Transfer Funds']", []) == 'text="Transfer Funds"'
+
+
 async def test_execute_step_raises_after_repeating_same_failing_action(explorer):
     # Same action/selector/value every time, and it keeps FAILING - a
     # genuinely stuck step, never "done" - should hit the loop guard.
