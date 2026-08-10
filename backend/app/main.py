@@ -30,8 +30,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app.agents.claude_client import ClaudeLLMClient
+from app.agents.explorer import ExplorerAgent
 from app.agents.llm_client import LLMError
-from app.agents.pipeline import run_both, run_pipeline
+from app.agents.pipeline import make_llm, run_both, run_pipeline
+from app.agents.schema import ActionLogEntry, AskContext
 from app.auth import AuthError, login as auth_login, logout as auth_logout, require_auth, require_auth_ws
 from app.browser import BrowserSession
 from app.domains.manifest import load_domains, save_workflow, slugify
@@ -269,6 +271,87 @@ async def run_pipeline_ws(websocket: WebSocket, token: str = Depends(require_aut
         pass
     except Exception as exc:
         await websocket.send_json({"type": "error", "message": str(exc)})
+
+
+ASK_SITE_VALID_PROVIDERS = ("claude", "ollama")
+
+
+@app.websocket("/ws/ask-site")
+async def ask_site_ws(websocket: WebSocket, token: str = Depends(require_auth_ws)) -> None:
+    """Day 10's "Ask the Site" search bar. Client sends
+    {"question": "...", "provider": "claude"|"ollama", "context": {...} | null}
+    once. context, when given, is whatever richer data the dashboard
+    already has for a live/just-finished run - answered from that
+    directly instead of the Explorer re-exploring the same site from
+    scratch. Reuses ExplorerAgent.ask() (on-demand mode) rather than a
+    separate agent - see its docstring for why. Streams live action
+    events while browsing (same shape as /ws/pipeline's "action"
+    events), then exactly one terminal event: "declined" (unrecognized
+    domain) or "answer".
+    Connect as /ws/ask-site?token=<token> from login - the WebSocket API
+    can't set an Authorization header."""
+    await websocket.accept()
+    try:
+        data = await websocket.receive_json()
+        question = (data.get("question") or "").strip()
+        provider = data.get("provider", "claude")
+        context_in = data.get("context")
+
+        if not question:
+            await websocket.send_json({"type": "error", "message": "No question provided."})
+            return
+        if provider not in ASK_SITE_VALID_PROVIDERS:
+            await websocket.send_json(
+                {"type": "error", "message": f"Unknown provider {provider!r} - expected claude or ollama."}
+            )
+            return
+
+        existing_context = None
+        if context_in:
+            try:
+                existing_context = AskContext(
+                    domain=context_in["domain"],
+                    final_url=context_in.get("final_url"),
+                    final_page_text=context_in.get("final_page_text"),
+                    actions=[ActionLogEntry(**a) for a in context_in.get("actions", [])],
+                )
+            except (KeyError, TypeError, ValueError):
+                # A malformed context (e.g. a stale/partial frontend state)
+                # just falls back to live exploration instead of failing
+                # the whole question over it.
+                existing_context = None
+
+        try:
+            llm = make_llm(provider)
+        except LLMError as exc:
+            await websocket.send_json({"type": "error", "message": str(exc)})
+            return
+
+        async def on_action(event: dict) -> None:
+            event_type = event.pop("kind", "action")
+            await websocket.send_json({"type": event_type, **event})
+
+        await websocket.send_json({"type": "status", "message": "Checking which site this question is about…"})
+        explorer = ExplorerAgent(llm=llm, on_action=on_action)
+        result = await explorer.ask(question, existing_context=existing_context)
+
+        if not result.matched:
+            await websocket.send_json({"type": "declined", "reason": result.reason})
+            return
+
+        await websocket.send_json(
+            {
+                "type": "answer",
+                "domain": result.domain,
+                "answer": result.answer,
+                "source": result.source,
+                "final_url": result.final_url,
+            }
+        )
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:
+        await websocket.send_json({"type": "error", "message": str(exc) or f"{exc.__class__.__name__} (no further detail)"})
 
 
 @app.get("/api/history", response_model=list[HistoryEntry])

@@ -39,6 +39,32 @@ class ExplorationResult(BaseModel):
     error: str | None = None
 
 
+class AskContext(BaseModel):
+    """Whatever richer context the caller already has for the matched
+    domain - a live or just-finished run's own real observations - so a
+    question can be answered directly from it instead of the Explorer
+    re-exploring the same site from scratch."""
+
+    domain: str
+    final_url: str | None = None
+    final_page_text: str | None = None
+    actions: list[ActionLogEntry] = []
+
+
+class AskResult(BaseModel):
+    """One on-demand "ask the site" query - the Explorer's answer to a
+    plain-English question, not a pass/fail workflow result."""
+
+    question: str
+    matched: bool
+    domain: str | None = None
+    reason: str | None = None  # set when matched is False - why nothing matched
+    answer: str | None = None  # set when matched is True
+    source: str | None = None  # "existing_context" | "live_explore", set when matched is True
+    final_url: str | None = None
+    actions: list[ActionLogEntry] = []  # only populated when source == "live_explore"
+
+
 class VerifierResult(BaseModel):
     ticket_id: str
     domain: str

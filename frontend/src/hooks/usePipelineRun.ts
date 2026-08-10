@@ -77,6 +77,16 @@ export function usePipelineRun() {
   const [stages, setStages] = useState<Partial<Record<Provider, StageMap>>>({});
   const [frames, setFrames] = useState<Partial<Record<Provider, ActionFrame>>>({});
   const [frameHistory, setFrameHistory] = useState<Partial<Record<Provider, ActionFrame[]>>>({});
+  // Unlike frameHistory (capped at MAX_FRAME_HISTORY for the filmstrip
+  // UI), this keeps every real action for the run's lifetime - what the
+  // Ask-the-Site search bar's "richer context already collected" needs
+  // while a run is still in progress, before pipeline_done ever fires.
+  const [actionsLog, setActionsLog] = useState<Partial<Record<Provider, ActionFrame[]>>>({});
+  // The domain.base_url the Explorer navigated to first (from the
+  // "page_loaded" action every explore()/ask() emits) - lets the search
+  // bar resolve which registered domain a still-running provider is
+  // actually on, without waiting for pipeline_done to learn plan.domain.
+  const [baseUrls, setBaseUrls] = useState<Partial<Record<Provider, string>>>({});
   const [results, setResults] = useState<Partial<Record<Provider, PipelineResult>>>({});
   const [historyIds, setHistoryIds] = useState<Partial<Record<Provider, number>>>({});
   const [comparison, setComparison] = useState<ComparisonReport | null>(null);
@@ -91,6 +101,8 @@ export function usePipelineRun() {
     setStages({});
     setFrames({});
     setFrameHistory({});
+    setActionsLog({});
+    setBaseUrls({});
     setResults({});
     setHistoryIds({});
     setComparison(null);
@@ -108,6 +120,8 @@ export function usePipelineRun() {
       setFeed([]);
       setFrames({});
       setFrameHistory({});
+      setActionsLog({});
+      setBaseUrls({});
       setResults({});
       setHistoryIds({});
       setComparison(null);
@@ -173,6 +187,10 @@ export function usePipelineRun() {
             const existing = prev[data.provider] ?? [];
             return { ...prev, [data.provider]: [...existing, frame].slice(-MAX_FRAME_HISTORY) };
           });
+          setActionsLog((prev) => ({ ...prev, [data.provider]: [...(prev[data.provider] ?? []), frame] }));
+          if (data.action === "page_loaded" && data.value) {
+            setBaseUrls((prev) => ({ ...prev, [data.provider]: data.value as string }));
+          }
         } else if (data.type === "frame") {
           // A background live-view tick, not a discrete action - swaps in
           // the newer screenshot so the picture keeps updating like a live
@@ -222,5 +240,8 @@ export function usePipelineRun() {
     [pushFeedMessage],
   );
 
-  return { status, feed, stages, frames, frameHistory, results, historyIds, comparison, errorMessage, start, reset, AGENTS };
+  return {
+    status, feed, stages, frames, frameHistory, actionsLog, baseUrls, results, historyIds, comparison,
+    errorMessage, start, reset, AGENTS,
+  };
 }

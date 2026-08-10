@@ -747,3 +747,44 @@ Running log of significant AI prompts used to build this project, per the intern
 - `frontend/src/tests/TrelloSettings.test.tsx` (new, 6 tests) - not-connected/settings/env status states render correctly, Disconnect only appears for the settings source, empty-field submission is rejected client-side without an API call, save and disconnect both trigger a real reload of status afterward.
 - Full backend suite (279 tests, +18) and frontend suite (47 tests, +6) pass; `tsc --noEmit` and `oxlint` clean.
 - **Not yet completed, and explicitly flagged to the mentor already:** this is one shared connection, not per-user (the app has a single shared login, not real user accounts, so there's no way to have two people's Trello boards connected at once); disconnecting deletes the local file but doesn't revoke the token on Trello's own side (only the user's own Trello account settings can do that); still requires manually generating a key/token from Trello's site rather than a one-click OAuth "Sign in with Trello" flow. All three are documented, agreed-on tradeoffs for this scope, not oversights.
+
+---
+
+## Day 10 - Ask-the-Site Search Bar & On-Demand Queries
+
+**Context:** The ticket's own framing: a search bar that answers plain-English questions about a known domain at any time - before, during, or after a run - by reusing the Explorer in an on-demand mode "rather than introducing a separate agent," and an unrecognized-domain query must decline the same way a test run does, never guess.
+
+**Prompt:** "ig its alr done" (Day 9), then the Day 10 ticket pasted with "1. Add epic / 2. KAN-16" Jira metadata and `Branch: feature/search-bar`. Confirmed the branch choice with the user the same way as Day 9's (new branch matching the ticket's own field, off the current work).
+
+**What was found:** the codebase already had half of the "richer context" answer path in a different shape - `/api/history/{run_id}/ask` answers a question about one *finished, saved* run from its stored report. Day 10 needed something broader: a domain-scoped question independent of any specific run, with a *live* browsing fallback when there's no relevant run to answer from - which is what actually justifies "reuses the Explorer" instead of just another LLM-over-stored-data endpoint like the existing one.
+
+**What was generated:**
+- `backend/app/agents/schema.py` - `AskContext` (whatever richer context a caller already has: domain, final_url/final_page_text, actions) and `AskResult` (question, matched, domain/reason, answer, source, final_url, actions).
+- `backend/app/agents/explorer.py` - `ExplorerAgent.ask(question, existing_context=None, close_browser=True)`, entirely on the existing agent, no new agent class:
+  - `_match_domain_for_question()` - the same "decide which registered domain this concerns, or say it doesn't match - never guess" prompt shape as the Planner's own `_match_domain`, adapted from a ticket to a free-form question. A hallucinated domain name outside the real manifest is treated as unmatched, same principle as the Planner already applies.
+  - `_answer_from_context()` - answers directly from an `AskContext` with one LLM call, no browser - the "during/after a run" fast path.
+  - `_ask_live()` - a new, small bounded loop (`ASK_MAX_ACTIONS = 4`, on purpose much smaller than a workflow step's budget - a question should only ever need a couple of clicks, not a multi-step workflow) reusing `_snapshot`/`_resolve_selector`/`_execute_action`/`_emit_action`/`_live_frame_loop` - the same real browsing machinery `explore()` uses - with a new `_ask_prompt()` that lets the model either take one more browsing action or answer now. Falls back to `_answer_from_context()` on whatever was actually observed if the budget runs out without a direct answer, rather than failing the question outright.
+- `backend/app/main.py` - new `/ws/ask-site` WebSocket (auth via the same `require_auth_ws` as `/ws/pipeline`): client sends `{"question", "provider", "context"}` once, server streams live action events while browsing (identical event shape to `/ws/pipeline`'s), then exactly one terminal event - `declined` or `answer`. A malformed `context` payload is ignored (falls back to live exploration) rather than failing the request.
+- `frontend/src/hooks/usePipelineRun.ts` - two small additions so a live/finished run's context is actually available to ask from: `actionsLog` (every real action for the run's lifetime, unlike `frameHistory`'s 10-frame cap for the filmstrip) and `baseUrls` (the domain's `base_url` captured off the Explorer's first `"page_loaded"` action) - lets the search bar resolve which registered domain a still-*running* provider is on, without waiting for `pipeline_done`.
+- `frontend/src/hooks/useAskSite.ts`, `frontend/src/types/asksite.ts`, `frontend/src/components/AskSiteBar.tsx` + `.css` (all new) - a fresh WebSocket per question; the bar reads `usePipelineRunContext()` and, if a run has finished for a matching domain, sends its real `exploration` as context; if a run is still going, sends the actions observed so far (domain resolved via `baseUrls` against `/api/domains`); otherwise sends no context, which correctly triggers a live check. Mounted once in `DashboardLayout`'s topbar, so it's present on every route regardless of run state - satisfying "available on the dashboard at all times" directly rather than duplicating it per page.
+
+**What was checked/modified before accepting:**
+- `backend/tests/unit/test_explorer_ask.py` (new, 7 tests) - declines an unrecognized domain without ever touching the browser; declines a hallucinated out-of-manifest domain; answers from existing context without browsing when the domain matches; ignores existing context for a *different* domain (falls through to live); answers immediately when the first page is enough; browses one action before answering; falls back to a context-answer when the action budget runs out.
+- `backend/tests/functional/test_ws_ask_site.py` (new, 7 tests) - auth required; empty question and unknown provider rejected; decline path; live action events stream before the final answer event; the provided context is actually threaded through to `ExplorerAgent.ask()`; a malformed context is ignored, not fatal.
+- `backend/tests/e2e/test_ask_site_real_browser.py` (new, 4 tests) - the actual acceptance criterion: real `ExplorerAgent.ask()`, a real Playwright browser, two real local fixture domains (reusing `login_page.html` and Day 9's `smoke_search_page.html`), three distinct query types - a direct factual question answered from the first page with zero browsing actions, a single-action behavior probe (search for a nonexistent product), a multi-action negative probe (wrong login credentials) on the *other* domain - plus one decline case for a domain that isn't registered at all. Captured live, once, outside the tests themselves as evidence the answers are genuinely observed, not scripted results dressed up as proof:
+  ```
+  === Type 2: single-action behavior probe (fixture_shop) ===
+  question: What does the site show when you search for a product that doesn't exist?
+  matched: True | domain: fixture_shop
+  actions taken: [('fill', '#search'), ('click', '#search-btn')]
+  answer: Searching for a nonexistent product shows the message There are no results found for your search.
+
+  === Type 3: multi-action negative probe (fixture_login_site)
+  question: What happens if you try to log in with the wrong username and password?
+  matched: True | domain: fixture_login_site
+  actions taken: [('fill', '#username'), ('fill', '#password'), ('click', '#login-btn')]
+  answer: Logging in with the wrong username and password does not show the welcome message - the login form stays on screen with no visible error.
+  ```
+- `frontend/src/tests/AskSiteBar.test.tsx` (new, 4 tests) - the search bar renders regardless of run state; a decline shows the "no domain knowledge" message, not a guess; a matched answer shows its domain badge; a just-finished run's real `exploration` data is genuinely what gets sent as `context` for a matching follow-up question (asserted against the exact JSON payload sent over the fake WebSocket, not just that *something* was sent).
+- Full backend suite (252 tests, +18 net) passes; frontend `tsc --noEmit`, `oxlint`, and `vitest` (37 tests, +4) all pass.
+- **Not yet completed:** the "during a run" context path resolves the active provider by picking whichever of claude/ollama has a result or base_url first - genuinely ambiguous for a "both" comparison run (which of the two providers' in-progress context should a question use?), not something this round tried to resolve properly. The search bar also always asks on the `claude` provider regardless of which model a run used - no provider picker on the bar itself yet.

@@ -68,3 +68,9 @@ export function getPipelineSocketUrl(): string {
   const base = API_BASE_URL.replace(/^http/, "ws");
   return `${base}/ws/pipeline${token ? `?token=${encodeURIComponent(token)}` : ""}`;
 }
+
+export function getAskSiteSocketUrl(): string {
+  const token = tokenStorage.getToken();
+  const base = API_BASE_URL.replace(/^http/, "ws");
+  return `${base}/ws/ask-site${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+}
