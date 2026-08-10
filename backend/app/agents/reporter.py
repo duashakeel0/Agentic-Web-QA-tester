@@ -108,16 +108,27 @@ class ReporterAgent:
 
     @staticmethod
     def _error_message(exploration: ExplorationResult, verification: VerifierResult) -> str | None:
-        """The most specific underlying error available, distinct from the
-        LLM-written failure reason - a Trello comment should show both."""
+        """The most specific underlying *execution* error available, distinct
+        from the LLM-written failure reason - a Trello comment should show
+        both, but only when there's a real execution error to show."""
         if verification.retry_error:
             return verification.retry_error
         if exploration.error:
             return exploration.error
-        # Excludes deliberate broken-input probes, same as Verifier's own
-        # _count_errors - a probe is *supposed* to fail, so its error is
-        # never the reason a real, unrelated assertion failed and showing
-        # it here would misattribute the cause of a genuine finding.
+        if exploration.completed:
+            # The exploration reached the end of the workflow - every step,
+            # including any that needed a retry along the way, ultimately
+            # succeeded (that's what "completed" means). A transient failed
+            # attempt earlier in the log is resolved noise at that point,
+            # not the reason verification failed - the real reason is
+            # whatever the assertion/explanation above already says. Showing
+            # a stray retry's error here would misattribute a perfectly
+            # normal recovery as if it were the actual cause of the finding.
+            return None
+        # Exploration never reached the end (a genuine ExplorerError stopped
+        # it) - the last real failure (never a deliberate broken-input
+        # probe, which is *supposed* to fail and is unrelated to why
+        # execution actually got stuck) is the most specific info available.
         failed_actions = [a for a in exploration.actions if not a.success and a.error and not a.is_broken_input_attempt]
         return failed_actions[-1].error if failed_actions else None
 

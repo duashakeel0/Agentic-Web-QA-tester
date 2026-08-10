@@ -592,3 +592,22 @@ Running log of significant AI prompts used to build this project, per the intern
 - New unit tests for `_error_message`: a broken-input-probe-only failure returns `None` (not the probe's own error); a probe failure *alongside* a real failed action still correctly surfaces the real one.
 - Full backend suite (216 tests, +5, including the new real-browser e2e test) passes.
 - **Not yet completed:** the dialog fix is verified against a local fixture reproducing the pattern, not the live site itself, since this sandbox can't reach it - worth confirming on your next real Automation Exercise Contact Us run that the success message now actually appears.
+
+---
+
+## Same misattribution bug, one level broader: a resolved retry blamed for an unrelated failure
+
+**Context:** A real `subscribe_to_newsletter` run showed "Click the subscribe button" as PASS (it took 4 attempts, but did succeed), yet the overall FAIL finding's error message was a truncated, unparseable JSON string from one of the earlier, already-resolved attempts - not the real reason. The Verifier had already written the correct explanation ("Newsletter subscription fails to show the success confirmation message"), but the misattributed error sat right next to it, undermining it.
+
+**Prompt:** "this kinda reports should be test passed but heres the error at testing / dn say test hi fail hogaya" - i.e. don't just accept "the test failed," actually explain why a report showing passing steps still reads as broken.
+
+**What was found:** the previous round's fix only excluded deliberate broken-input probes from `_error_message()`'s fallback - too narrow. The real, general rule: once `exploration.completed` is `True`, *every* step in the log succeeded, including ones that needed a retry - a failed attempt earlier in that step's history is resolved noise by definition, not a cause of anything. The old fallback picked "the last failed action's error" with no regard for whether that action's own step ultimately succeeded, so any transient hiccup along the way (an LLM timeout, a truncated JSON response, anything) could get shown as "the error" for a completely unrelated, real assertion failure discovered afterward.
+
+**What was generated:**
+- `backend/app/agents/reporter.py` - `_error_message()` now returns `None` whenever `exploration.completed` is `True` and there's no `retry_error`/`exploration.error` - the fallback to "last failed action's error" is reserved for when the exploration genuinely never completed (a real `ExplorerError` stopped it), which is the only case where that's actually diagnostic. The `is_broken_input_attempt` exclusion from the previous fix is kept for that narrower, still-real path.
+
+**What was checked/modified before accepting:**
+- The previous round's `test_error_message_still_reports_a_real_failed_action_alongside_a_probe` assumed a scenario (completed exploration with a genuinely unresolved failed action) that can't actually happen in practice - `_execute_step` either resolves a step or raises, setting `completed=False`. Replaced it with two tests matching real behavior: a resolved retry inside a completed exploration now correctly returns `None`; a genuinely incomplete exploration still correctly surfaces its last real failure.
+- New test for the exact reported scenario: a step that needed a retry before succeeding, inside a completed exploration, no longer surfaces that retry's error.
+- Full backend suite (217 tests, +2 net) passes.
+- **Not yet completed:** the underlying JSON-truncation itself (this time in the `reasoning` field) still happens occasionally even at the higher token budget from the previous round - harmless now since the retry loop absorbs it and the step still completes, but worth another bump to `DECISION_MAX_TOKENS` if it keeps costing extra action attempts (this run took 14 model calls / ~$0.12 for a 4-step workflow, higher than it should need).

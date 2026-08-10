@@ -88,27 +88,61 @@ def test_error_message_ignores_broken_input_probe_failures():
     assert error_message is None
 
 
-def test_error_message_still_reports_a_real_failed_action_alongside_a_probe():
+def test_error_message_ignores_resolved_retries_when_exploration_completed():
+    # Reproduces a second real report bug, one level broader than the probe
+    # case above: a step needed 4 attempts before succeeding (completely
+    # normal - that's what the retry loop is for), but the transient error
+    # from an early, since-resolved attempt still got shown as "the" error
+    # for a real, unrelated assertion failure discovered afterward. Once
+    # exploration.completed is True, every step in the log - including ones
+    # that needed a retry - genuinely succeeded, so a stray earlier failure
+    # is resolved noise, not the cause of anything.
     exploration = ExplorationResult(
-        ticket_id="T1", domain="automation_exercise", workflow="contact_us", completed=True,
+        ticket_id="T1", domain="automation_exercise", workflow="subscribe_to_newsletter", completed=True,
         actions=[
             ActionLogEntry(
-                step="Enter a message", action="fill", success=False,
-                error="Claude's response contained no text content.", is_broken_input_attempt=True,
+                step="Click the subscribe button", action="click", success=False,
+                error="claude returned an unparseable response: '{\"action\": \"click\"...",
             ),
-            ActionLogEntry(step="Click Submit", action="click", success=False, error="Timed out waiting for '#submit'"),
+            ActionLogEntry(step="Click the subscribe button", action="click", success=True),
         ],
-        final_url="https://x/contact_us", final_page_text="Get In Touch",
+        final_url="https://x/", final_page_text="Home",
     )
     verification = VerifierResult(
-        ticket_id="T1", domain="automation_exercise", workflow="contact_us", verdict="fail",
-        assertion_checked={"text_contains": "Success!"}, initial_check_passed=False, retried=True,
-        retry_passed=False, retry_error=None,
+        ticket_id="T1", domain="automation_exercise", workflow="subscribe_to_newsletter", verdict="fail",
+        assertion_checked={"text_contains": "You have been successfully subscribed!"},
+        initial_check_passed=False, retried=True, retry_passed=False, retry_error=None,
+        explanation="Newsletter subscription fails to show the success confirmation message.",
     )
 
     error_message = ReporterAgent._error_message(exploration, verification)
 
-    assert error_message == "Timed out waiting for '#submit'"
+    assert error_message is None
+
+
+def test_error_message_reports_last_failed_action_when_exploration_never_completed():
+    # The fallback still earns its keep for a genuinely incomplete
+    # exploration (a real ExplorerError stopped it) - there, a failed
+    # action's error is the most specific diagnostic info available, since
+    # nothing after it ever got the chance to resolve the problem.
+    exploration = ExplorationResult(
+        ticket_id="T1", domain="practice_software_testing", workflow="login", completed=False,
+        actions=[
+            ActionLogEntry(step="Log in", action="click", selector="#login-btn", success=True),
+            ActionLogEntry(
+                step="Log in", action="fill", selector="#password", value="x", success=False,
+                error="Timed out waiting for '#password'",
+            ),
+        ],
+    )
+    verification = VerifierResult(
+        ticket_id="T1", domain="practice_software_testing", workflow="login", verdict="fail",
+        assertion_checked={"url_contains": "/inventory.html"}, initial_check_passed=False, retried=False,
+    )
+
+    error_message = ReporterAgent._error_message(exploration, verification)
+
+    assert error_message == "Timed out waiting for '#password'"
 
 
 async def test_report_generates_low_severity_finding_for_pass_with_issues(reporter, monkeypatch):
