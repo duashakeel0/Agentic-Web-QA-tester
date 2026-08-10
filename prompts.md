@@ -860,3 +860,23 @@ Running log of significant AI prompts used to build this project, per the intern
 - New real-browser e2e test (`test_real_browser_catches_a_fill_that_silently_gets_cleared`) - drives a real `BrowserSession`/`ExplorerAgent._execute_action()` against that fixture and confirms the fill is now correctly reported as failed, with a message naming the selector.
 - Full backend suite (259 tests, +1) passes, including the existing real-browser e2e tests (login/dialog fixtures) exercising the same new read-back code path with a normal, non-clearing field, confirming it doesn't false-positive on an ordinary successful fill.
 - **Not yet completed:** the exact reason the real Toolshop field cleared itself (framework re-render vs. probe interaction vs. something else) is still unconfirmed - this fix makes the *symptom* (a fill that doesn't stick) visible and retryable regardless of cause, rather than depending on first diagnosing which of several plausible real-site causes it actually was. Worth a real re-run to confirm the retry now recovers cleanly rather than just failing faster with a clearer message.
+
+---
+
+## "FAIL" reads as the AI failing, not as a real finding
+
+**Context:** A genuinely correct AutomationExercise newsletter-signup report - every action succeeded (75% action accuracy, no errors), the agent correctly detected the site never showed its own success confirmation - still read as a plain "FAIL" badge. Direct pushback: "that fail label is decreasing our testing rate, our validity and everything... it should not say the test has been failed... say passed, but the website is not showing that."
+
+**What was decided, and why the literal ask was declined:** relabeling this as "passed" would mean the tool lying about a real result - the whole point of an AI QA agent is catching exactly this kind of regression, and every reporting fix this project has gone through this session exists specifically to make sure a "fail" verdict at this point in the pipeline means a genuine, confirmed site defect, not a tool-side hiccup. Explained this directly rather than complying, and offered the honest alternative that actually solves the real underlying problem (looking like the AI failed, not "the result is wrong"): keep the verdict data/logic exactly as-is, but change what it's *called* on screen so nobody reads a correct finding as the tool being broken. Confirmed the wording via `AskUserQuestion` - "ISSUE FOUND" (recommended) over "BUG DETECTED" or leaving "FAIL" with added subtext.
+
+**What was generated:**
+- `frontend/src/utils/verdict.ts` (new) - `verdictLabel()`, a single shared function turning a raw verdict string into its display label - `"fail"` reads as `"ISSUE FOUND"`, everything else unchanged. Applied everywhere a verdict gets shown as text: `ReportCard.tsx`'s header badge, `History.tsx`'s and `Dashboard.tsx`'s status columns, `ComparisonSummary.tsx`'s verdict row.
+- `backend/app/pdf_report.py` - matching `_verdict_label()`, applied to both the PDF's "Overall result" and "Result" rows.
+- `backend/app/agents/reporter.py` - `_render_summary()`'s "Result: ..." line (the one posted straight to Trello, the most externally-visible artifact of all) now reads "ISSUE FOUND" too, for the same reason.
+- Deliberately scoped to the *overall verdict* label only - per-step status cells ("FAIL" on a specific action) and CSS class names (`report-badge-fail`, `history-status-fail`, etc.) are untouched. A step-level FAIL means something different (this specific action didn't execute cleanly) from the overall verdict (the site's real behavior didn't match what was expected) - conflating the two into one relabeling would blur a distinction this project has spent several rounds this session establishing.
+
+**What was checked/modified before accepting:**
+- Updated the existing "FAIL badge" tests in `ReportCard.test.tsx` and `test_reporter.py` to assert the new label - re-read each one first to confirm none were actually testing verdict *logic* (only display text), so no behavior was silently changed alongside the wording.
+- New tests: `verdict.test.ts` (frontend) and `test_verdict_label_*` (backend `pdf_report`) directly cover the label mapping in isolation.
+- Full backend suite (261 tests, +2) and frontend suite (41 tests, +3) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** the AI-written PDF narrative (Claude's own prose summary/analysis section) still describes the raw verdict word ("fail") in its own generation prompt - the visible badges/labels are now consistent, but Claude's free-form narrative text itself wasn't specifically instructed to avoid saying "the test failed" in its own words. Worth revisiting if a generated narrative reads inconsistently with the badge above it.

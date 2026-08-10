@@ -1,7 +1,19 @@
 from PIL import Image as PILImage
 
 from app.history.schema import HistoryDetail
-from app.pdf_report import _format_expected_outcome, _step_rows, build_pdf
+from app.pdf_report import _format_expected_outcome, _step_rows, _verdict_label, build_pdf
+
+
+def test_verdict_label_reads_fail_as_issue_found():
+    # "FAIL" reads as if the AI agent itself failed to do its job - by
+    # this point it ran the workflow correctly and found a real defect on
+    # the site under test, so the label reflects that instead.
+    assert _verdict_label("fail") == "ISSUE FOUND"
+
+
+def test_verdict_label_leaves_other_verdicts_alone():
+    assert _verdict_label("pass") == "PASS"
+    assert _verdict_label("pass_with_issues") == "PASS WITH ISSUES"
 
 _NARRATIVE = {
     "executive_summary": "Summary.",

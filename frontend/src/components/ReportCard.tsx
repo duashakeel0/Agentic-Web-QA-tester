@@ -143,7 +143,10 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
   ) : (
     <CheckCircle2 size={12} aria-hidden="true" />
   );
-  const badgeLabel = isFail ? "FAIL" : isWarn ? "PASS WITH ISSUES" : "PASS";
+  // "ISSUE FOUND" rather than "FAIL" - by this point the agent has run
+  // the workflow correctly and found a real defect on the site under
+  // test, not failed to do its own job; see utils/verdict.ts.
+  const badgeLabel = isFail ? "ISSUE FOUND" : isWarn ? "PASS WITH ISSUES" : "PASS";
 
   return (
     <div className={`report-card ${cardClass}`}>

@@ -39,6 +39,17 @@ _GRID = colors.HexColor("#cccccc")
 _VERDICT_COLORS = {"pass": _PASS_COLOR, "pass_with_issues": _WARN_COLOR, "fail": _FAIL_COLOR}
 _STEP_STATUS_COLORS = {"PASS": _PASS_COLOR, "FAIL": _FAIL_COLOR, "SKIPPED": _SKIP_COLOR, "NOT REACHED": _SKIP_COLOR}
 
+
+def _verdict_label(verdict: str) -> str:
+    """"ISSUE FOUND" rather than "FAIL" - by the time a run reaches this
+    verdict, the agent has run the workflow correctly and found a real
+    defect on the site under test, not failed to do its own job. Every
+    other verdict displays as its own plain, underscore-free uppercase
+    text, same as before."""
+    if verdict == "fail":
+        return "ISSUE FOUND"
+    return verdict.replace("_", " ").upper()
+
 # Screenshots are served from main.py's /screenshots static mount, but the
 # PDF needs the real file on disk - this is that mount's target directory,
 # kept in sync with main.py's SCREENSHOTS_DIR by convention (both point at
@@ -254,7 +265,7 @@ def build_pdf(entry: HistoryDetail, narrative: dict) -> bytes:
         ["Test executed", f"{_fmt_ts(entry.started_at)} — {_fmt_ts(entry.finished_at)}"],
         ["Total duration", f"{entry.total_duration_ms / 1000:.1f}s"],
         ["Estimated cost", f"${entry.estimated_cost_usd:.4f}"],
-        ["Overall result", verdict.replace("_", " ").upper()],
+        ["Overall result", _verdict_label(verdict)],
     ]
     info_table = Table(info_rows, colWidths=[160, 310])
     info_table.setStyle(
@@ -317,7 +328,7 @@ def build_pdf(entry: HistoryDetail, narrative: dict) -> bytes:
     outcome_rows = [
         ["Expected", Paragraph(_format_expected_outcome(plan.get("expected_outcome")), body)],
         ["Actual", Paragraph(actual_text, body)],
-        ["Result", verdict.replace("_", " ").upper()],
+        ["Result", _verdict_label(verdict)],
     ]
     outcome_table = Table(outcome_rows, colWidths=[80, 390])
     outcome_table.setStyle(

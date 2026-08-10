@@ -69,10 +69,14 @@ describe("ReportCard", () => {
     expect(screen.getByText(/expected outcome was verified/)).toBeInTheDocument();
   });
 
-  it("shows a FAIL badge with failure reason and error message", () => {
+  it("shows an ISSUE FOUND badge (not FAIL) with failure reason and error message", () => {
+    // "FAIL" reads as if the AI agent itself failed to do its job - by
+    // this point it ran the workflow correctly and found a real defect
+    // on the site under test, so the badge says so instead.
     render(<ReportCard result={failingResult()} />);
 
-    expect(screen.getByText("FAIL")).toBeInTheDocument();
+    expect(screen.getByText("ISSUE FOUND")).toBeInTheDocument();
+    expect(screen.queryByText("FAIL")).not.toBeInTheDocument();
     expect(screen.getByText(/Login button does not respond/)).toBeInTheDocument();
     expect(screen.getByText(/Timed out waiting for '#login-button'/)).toBeInTheDocument();
   });
@@ -133,9 +137,12 @@ describe("ReportCard", () => {
 
     render(<ReportCard result={result} />);
 
-    const failStatuses = screen.getAllByText("FAIL");
-    // The header badge and the step-table status cell both say "FAIL".
-    expect(failStatuses.length).toBeGreaterThanOrEqual(2);
+    // The header badge reads "ISSUE FOUND" (a finding about the site),
+    // while the step-table status cell for the specific action that
+    // failed still reads "FAIL" (an execution-level outcome) - the two
+    // are deliberately different labels for different things.
+    expect(screen.getByText("ISSUE FOUND")).toBeInTheDocument();
+    expect(screen.getAllByText("FAIL").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Timed out")).toBeInTheDocument();
   });
 

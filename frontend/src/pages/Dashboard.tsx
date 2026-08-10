@@ -29,6 +29,7 @@ import type { RunStatus } from "../hooks/usePipelineRun";
 import { apiGet, ApiError } from "../services/api";
 import type { DailyStat, HistoryEntry, HistoryStats, ProviderStats, SiteStats } from "../types/history";
 import type { ModelChoice, Provider } from "../types/pipeline";
+import { verdictLabel } from "../utils/verdict";
 import "./Dashboard.css";
 
 // Claude first, then Ollama - the order the combined report reads in:
@@ -422,7 +423,7 @@ function Dashboard() {
                   </div>
                   <div className="dash-history-right">
                     <span className={`dash-history-status status-${run.verdict ?? "unmatched"}`}>
-                      {run.verdict ? run.verdict.replace(/_/g, " ").toUpperCase() : "N/A"}
+                      {run.verdict ? verdictLabel(run.verdict) : "N/A"}
                     </span>
                     <span className="dash-history-time">{formatDate(run.created_at)}</span>
                   </div>
