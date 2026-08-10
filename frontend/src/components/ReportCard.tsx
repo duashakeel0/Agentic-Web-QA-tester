@@ -36,9 +36,20 @@ interface StepRow {
  * actions at all is either "skipped" (already satisfied when the page
  * loaded, only possible for a completed run) or "not reached" (exploration
  * stopped before it). */
-function buildStepRows(plan: TestPlan, exploration: ExplorationResult | undefined): StepRow[] {
+function buildStepRows(plan: TestPlan, exploration: ExplorationResult | undefined, verdict: string | undefined): StepRow[] {
   const actions = exploration?.actions ?? [];
   const completed = exploration?.completed ?? false;
+  const realActions = actions.filter((a: ActionLogEntry) => !a.is_broken_input_attempt);
+  // When the workflow ran to completion but the overall verdict is still
+  // "fail", the expected outcome was never actually reached (e.g. a
+  // login click succeeds mechanically, but the site never authenticates).
+  // Every earlier step genuinely achieved its own local goal; it's
+  // specifically the last real action taken - the one the final
+  // assertion actually depends on - whose unqualified "PASS" reads as a
+  // contradiction sitting right above a FAIL badge.
+  const failedStep = completed && verdict === "fail" && realActions.length > 0
+    ? realActions[realActions.length - 1].step
+    : null;
 
   return plan.steps.map((step) => {
     const stepActions = actions.filter((a: ActionLogEntry) => a.step === step && !a.is_broken_input_attempt);
@@ -46,6 +57,9 @@ function buildStepRows(plan: TestPlan, exploration: ExplorationResult | undefine
       return completed
         ? { step, status: "SKIPPED", note: "Already satisfied when the page loaded - no action needed." }
         : { step, status: "NOT REACHED", note: "Exploration stopped before this step was attempted." };
+    }
+    if (step === failedStep) {
+      return { step, status: "FAIL", note: "The action completed, but did not achieve the expected outcome - see Findings below." };
     }
     // A step's real outcome is whether it was ever actually achieved, not
     // whether its literal last logged attempt happened to succeed - a step
@@ -203,7 +217,7 @@ function ReportCard({ result, historyId }: { result: PipelineResult; historyId?:
                 </tr>
               </thead>
               <tbody>
-                {buildStepRows(plan, exploration).map((row, i) => (
+                {buildStepRows(plan, exploration, verdict).map((row, i) => (
                   <tr key={i}>
                     <td>{i + 1}</td>
                     <td>{row.step}</td>

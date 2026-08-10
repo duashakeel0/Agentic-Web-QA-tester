@@ -271,3 +271,45 @@ def test_step_rows_passes_a_step_that_succeeded_before_a_later_unrelated_hiccup(
 
     assert rows[0]["status"] == "PASS"
     assert "2 action(s)" in rows[0]["note"]
+
+
+def test_step_rows_fails_the_last_step_when_every_action_succeeded_but_the_verdict_is_fail():
+    # Reproduces a real practice_software_testing login report: every
+    # action (fill email, fill password, click login) genuinely succeeded
+    # with no error, yet the site never actually authenticated - a step
+    # table showing an unqualified PASS on every row right above a FAIL
+    # badge read as a contradiction. Only the last real action (the one
+    # the final assertion depends on) should read FAIL.
+    plan = {"steps": ["Enter the email", "Enter the password", "Click the Login button"]}
+    exploration = {
+        "completed": True,
+        "actions": [
+            {"step": "Enter the email", "action": "fill", "selector": "#email", "success": True, "is_broken_input_attempt": False},
+            {"step": "Enter the password", "action": "fill", "selector": "#password", "success": True, "is_broken_input_attempt": False},
+            {"step": "Click the Login button", "action": "click", "selector": "input[type='submit']", "success": True, "is_broken_input_attempt": False},
+        ],
+    }
+
+    rows = _step_rows(plan, exploration, verdict="fail")
+
+    assert rows[0]["status"] == "PASS"
+    assert rows[1]["status"] == "PASS"
+    assert rows[2]["status"] == "FAIL"
+    assert "did not achieve the expected outcome" in rows[2]["note"]
+
+
+def test_step_rows_leaves_every_step_alone_when_verdict_is_not_fail():
+    # The downgrade only applies to a genuine "fail" - a pass_with_issues
+    # verdict means the real assertion WAS satisfied, so every step that
+    # actually succeeded should still read PASS.
+    plan = {"steps": ["Click the Login button"]}
+    exploration = {
+        "completed": True,
+        "actions": [
+            {"step": "Click the Login button", "action": "click", "selector": "#login", "success": True, "is_broken_input_attempt": False},
+        ],
+    }
+
+    rows = _step_rows(plan, exploration, verdict="pass_with_issues")
+
+    assert rows[0]["status"] == "PASS"

@@ -685,6 +685,95 @@ async def test_explore_skips_llm_call_for_redundant_first_navigate_step(monkeypa
     assert executed_steps == ["Click the login button"]
 
 
+async def test_explore_does_not_skip_a_first_step_whose_literal_url_differs_from_base_url(monkeypatch):
+    # Reproduces a real Toolshop failure: step 1 is "Navigate to the URL
+    # https://x/auth/login (a direct page navigation - ...)", but
+    # domain.base_url is the plain homepage "https://x" - a genuinely
+    # different page. The old skip check only compared "is the browser at
+    # domain.base_url", true right after goto() regardless of what THIS
+    # step actually asked for, so it silently skipped ever navigating to
+    # /auth/login at all - every step after it (fill email, fill
+    # password, click login) then ran against the wrong page, which is
+    # exactly why the email field sometimes couldn't be found/filled and
+    # login never actually reached /account.
+    monkeypatch.setattr(
+        explorer_module,
+        "load_domains",
+        lambda: [Domain(name="fake_domain", base_url="https://x", workflows=[])],
+    )
+
+    fake_browser = _FakeBrowserFull()
+    agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM())
+
+    executed_steps: list[str] = []
+
+    async def _recording_execute_step(step, actions):
+        executed_steps.append(step)
+
+    async def _noop_broken_input(step, actions):
+        return None
+
+    agent._execute_step = _recording_execute_step
+    agent._attempt_broken_input = _noop_broken_input
+
+    plan = TestPlan(
+        ticket_id="T1",
+        matched=True,
+        domain="fake_domain",
+        workflow="w",
+        steps=[
+            "Navigate to the URL https://x/auth/login (a direct page navigation - do not use the search bar)",
+            "Enter the email",
+        ],
+    )
+
+    result = await agent.explore(plan)
+
+    assert result.completed is True
+    # The first step was NOT skipped - its literal URL differs from
+    # domain.base_url, so it still goes through the normal decision loop
+    # (which is what actually navigates to /auth/login for real).
+    assert executed_steps == [
+        "Navigate to the URL https://x/auth/login (a direct page navigation - do not use the search bar)",
+        "Enter the email",
+    ]
+
+
+async def test_explore_still_skips_a_first_step_with_no_literal_url_at_base_url(monkeypatch):
+    # The ParaBank case this optimization was originally built for still
+    # works: "Navigate to the ParaBank homepage" names no literal URL, so
+    # it falls back to comparing against domain.base_url, same as before.
+    monkeypatch.setattr(
+        explorer_module,
+        "load_domains",
+        lambda: [Domain(name="fake_domain", base_url="https://x", workflows=[])],
+    )
+
+    fake_browser = _FakeBrowserFull()
+    agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM())
+
+    executed_steps: list[str] = []
+
+    async def _recording_execute_step(step, actions):
+        executed_steps.append(step)
+
+    async def _noop_broken_input(step, actions):
+        return None
+
+    agent._execute_step = _recording_execute_step
+    agent._attempt_broken_input = _noop_broken_input
+
+    plan = TestPlan(
+        ticket_id="T1", matched=True, domain="fake_domain", workflow="w",
+        steps=["Navigate to the homepage", "Click the login button"],
+    )
+
+    result = await agent.explore(plan)
+
+    assert result.completed is True
+    assert executed_steps == ["Click the login button"]
+
+
 async def test_explore_does_not_skip_first_step_when_not_yet_at_base_url(monkeypatch):
     # The skip only applies when the browser is already exactly where the
     # step wants it - if goto() landed somewhere else (a redirect, a

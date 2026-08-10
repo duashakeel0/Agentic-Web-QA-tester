@@ -99,6 +99,10 @@ _CONTAINS_TEXT_PATTERN = re.compile(r"""contains\([^,)]*,?\s*['"]([^'"]+)['"]\s*
 # or anything more elaborate - since only this simple shape is safe to
 # rewrite by matching against a single element's real id.
 _BARE_ID_SELECTOR_PATTERN = re.compile(r"^#([\w-]+)$")
+# A literal URL named in a step's own text (e.g. "Navigate to the URL
+# https://x/auth/login") - used by the redundant-first-step skip below to
+# check the step's real target, not just assume it means domain.base_url.
+_LITERAL_URL_PATTERN = re.compile(r"https?://\S+")
 
 _SNAPSHOT_JS = """
 () => Array.from(document.querySelectorAll(
@@ -187,21 +191,34 @@ class ExplorerAgent:
             )
 
             for index, step in enumerate(plan.steps):
-                if (
-                    index == 0
-                    and not self._is_interactive_step(step)
-                    and self._same_url(self._browser.page.url, domain.base_url)
-                ):
-                    # The goto() above already put the browser on
-                    # domain.base_url - a first step that's just asking to
-                    # be "on the homepage"/navigated to that same page is
-                    # therefore already satisfied, deterministically, with
-                    # no model call needed at all. Skips a weaker model
-                    # sometimes ignoring the nav_hint instruction not to
-                    # interact here and inventing an unnecessary click
-                    # instead (e.g. a hallucinated, nonexistent "#home"
-                    # selector that only ever times out).
-                    continue
+                if index == 0 and not self._is_interactive_step(step):
+                    url_match = _LITERAL_URL_PATTERN.search(step)
+                    # A first step naming a literal URL ("Navigate to the
+                    # URL https://x/auth/login") must be checked against
+                    # THAT exact URL, not unconditionally against
+                    # domain.base_url - the two happen to be the same for
+                    # a step like "Navigate to the ParaBank homepage" (no
+                    # literal URL, falls back to base_url below), but are
+                    # very much not the same for a workflow whose first
+                    # step deliberately routes past the homepage to a
+                    # specific page. Comparing against base_url
+                    # unconditionally used to silently treat a first step
+                    # asking for a completely different page as already
+                    # satisfied - confirmed for real on Toolshop's login
+                    # workflow, where this skipped the required navigation
+                    # to /auth/login entirely and left every step after it
+                    # running against the homepage instead.
+                    target_url = url_match.group(0).rstrip(").,;:'\"") if url_match else domain.base_url
+                    if self._same_url(self._browser.page.url, target_url):
+                        # The goto() above already put the browser on this
+                        # step's real target - it's therefore already
+                        # satisfied, deterministically, with no model call
+                        # needed at all. Skips a weaker model sometimes
+                        # ignoring the nav_hint instruction not to
+                        # interact here and inventing an unnecessary click
+                        # instead (e.g. a hallucinated, nonexistent "#home"
+                        # selector that only ever times out).
+                        continue
 
                 if not broken_input_done and self._is_interactive_step(step):
                     await self._attempt_broken_input(step, actions)

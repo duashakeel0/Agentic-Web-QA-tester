@@ -83,7 +83,7 @@ def _format_expected_outcome(expected: dict | None) -> str:
     return " AND ".join(parts) if parts else "n/a"
 
 
-def _step_rows(plan: dict, exploration: dict | None) -> list[dict]:
+def _step_rows(plan: dict, exploration: dict | None, verdict: str | None = None) -> list[dict]:
     """One row per planned test step, derived entirely from the real action
     log rather than fabricated - a step with no actions at all is either
     "skipped" (already satisfied when the page loaded, only possible for a
@@ -91,6 +91,19 @@ def _step_rows(plan: dict, exploration: dict | None) -> list[dict]:
     steps = plan.get("steps") or []
     actions = (exploration or {}).get("actions") or []
     completed = bool((exploration or {}).get("completed"))
+    real_actions = [a for a in actions if not a.get("is_broken_input_attempt")]
+    # When the workflow ran to completion (every step's action executed
+    # with no error) but the overall verdict is still "fail", the
+    # expected outcome was never actually reached - a real ParaBank/
+    # Toolshop-style login case: the click succeeds mechanically, but the
+    # site never authenticates. Every earlier step genuinely achieved its
+    # own local goal (a field got filled); it's specifically the last
+    # real action taken - the one the final assertion actually depends
+    # on - whose "PASS" is misleading next to an overall FAIL badge.
+    # Marked here, not just left to the Findings section, since a step
+    # table that shows a clean sweep right above a FAIL verdict reads as
+    # a contradiction rather than "the click worked, the login didn't."
+    failed_step = real_actions[-1]["step"] if (completed and verdict == "fail" and real_actions) else None
 
     rows = []
     for step in steps:
@@ -100,6 +113,9 @@ def _step_rows(plan: dict, exploration: dict | None) -> list[dict]:
                 status, note = "SKIPPED", "Already satisfied when the page loaded - no action needed."
             else:
                 status, note = "NOT REACHED", "Exploration stopped before this step was attempted."
+        elif step == failed_step:
+            status = "FAIL"
+            note = "The action completed, but did not achieve the expected outcome - see Findings below."
         else:
             # A step's real outcome is whether it was ever actually
             # achieved, not whether its literal last logged attempt
@@ -258,7 +274,7 @@ def build_pdf(entry: HistoryDetail, narrative: dict) -> bytes:
 
     # ---- Test execution summary -------------------------------------------
     story.append(Paragraph("2. Test Execution Summary", h2))
-    step_rows = _step_rows(plan, exploration)
+    step_rows = _step_rows(plan, exploration, verdict)
     steps_passed = sum(1 for r in step_rows if r["status"] == "PASS")
     steps_failed = sum(1 for r in step_rows if r["status"] == "FAIL")
     actions_attempted = int(metrics.get("actions_attempted", 0))
