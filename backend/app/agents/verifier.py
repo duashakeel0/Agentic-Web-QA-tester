@@ -118,7 +118,23 @@ class VerifierAgent:
     def _count_errors(result: ExplorationResult) -> int:
         # Deliberate broken-input probes are SUPPOSED to fail - excluded so
         # intentional negative testing never counts against a clean run.
-        return sum(1 for a in result.actions if not a.success and not a.is_broken_input_attempt)
+        #
+        # action == "unknown" means no real action was ever attempted
+        # against the site at all - it's Explorer's own LLMError catch
+        # (a model call that timed out, returned unparseable JSON, or
+        # omitted a required field), logged as "unknown" precisely because
+        # there was no usable decision to execute. That's a hiccup in our
+        # own agent's decision-making, not evidence the site under test has
+        # a real issue - counting it here conflates the two, and demotes
+        # an otherwise clean pass to pass_with_issues over a resolved
+        # mistake of ours rather than a genuine site-side flake (a real
+        # Playwright timeout/error on an actual click, fill, etc. still
+        # counts, since that's real signal about the application).
+        return sum(
+            1
+            for a in result.actions
+            if not a.success and not a.is_broken_input_attempt and a.action != "unknown"
+        )
 
     @staticmethod
     def _check_assertion(expected: dict, url: str | None, text: str | None) -> bool:

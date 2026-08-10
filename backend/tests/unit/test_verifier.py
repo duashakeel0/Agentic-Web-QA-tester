@@ -43,6 +43,26 @@ async def test_verify_passes_with_issues_when_actions_failed_but_end_state_is_co
     assert verdict.warning_count == 1
 
 
+async def test_verify_ignores_unknown_action_failures_for_pass_with_issues(verifier):
+    # Reproduces the real complaint this fixes: a retry caused by our own
+    # agent's LLM-decision hiccup (recorded as action="unknown" - no real
+    # action was ever attempted against the site) isn't evidence the site
+    # under test has a real issue, and shouldn't demote an otherwise clean
+    # pass. Distinct from a genuine site-side flake (a real Playwright
+    # timeout on an actual click/fill), which still correctly counts.
+    verifier._llm.queue("Login succeeded with no real issues.")
+    llm_hiccup = ActionLogEntry(
+        step="Click Submit", action="unknown", success=False,
+        error="claude returned an unparseable response",
+    )
+    result = _exploration(actions=[llm_hiccup])
+
+    verdict = await verifier.verify({"url_contains": "/inventory.html", "text_contains": "Products"}, result)
+
+    assert verdict.verdict == "pass"
+    assert verdict.warning_count == 0
+
+
 async def test_verify_ignores_broken_input_probes_for_pass_with_issues(verifier):
     verifier._llm.queue("Login succeeded; the deliberate bad-input probe correctly failed.")
     probe = ActionLogEntry(

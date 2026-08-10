@@ -650,3 +650,19 @@ Running log of significant AI prompts used to build this project, per the intern
 - Confirmed the existing "single failed action, no successes" test still correctly reads FAIL - the fix only changes behavior when a real success is mixed in with a later failure, not for a step that never actually succeeded.
 - Full backend suite (219 tests, +1) and frontend suite (33 tests, +1) pass; `tsc --noEmit` and `oxlint` clean.
 - **Not yet completed:** this is the third round fixing a "last logged item ≠ real outcome" bug in a different location (error_message, then error_message again more broadly, now step status) - all three traced back to the same underlying JSON-truncation issue still occasionally happening even at the current token budget. The framing bugs are now fixed everywhere they were found, but the truncation itself is still the thing generating the noise in the first place.
+
+---
+
+## A resolved LLM hiccup shouldn't demote a clean pass to pass_with_issues
+
+**Context:** Direct pushback on the last several rounds' fixes: "cif any action btw 6-7 actions needed a retry doesnt mean test was passes with issues / retry shld made this declaration / fix it." A fair, sharper distinction than what the verdict logic actually made: `pass_with_issues` exists to surface a real hiccup *on the site being tested* (a slow-loading button, a flaky element) - genuine QA signal. But the failures chased over the last three rounds weren't that at all; they were Explorer's own LLM call failing to produce a usable decision (timeout, unparseable JSON, no text content) - a hiccup in our tooling, not evidence of anything wrong with the application under test. Counting that against the verdict conflated the two.
+
+**What was generated:**
+- `backend/app/agents/verifier.py` - `_count_errors()` now also excludes any action logged with `action == "unknown"`, on top of the existing broken-input-probe exclusion. "unknown" is Explorer's own convention for "no real action was ever attempted against the site" - it's set exactly and only in the `LLMError` catch block, when the model call itself failed before there was ever a decision to execute. A genuine site-side failure (a real Playwright timeout/error on an actual click, fill, etc.) still correctly counts - that distinction is what makes this a real fix rather than just hiding warnings.
+
+**What was checked/modified before accepting:**
+- New test: an `action="unknown"` failure (the exact LLM-hiccup shape) no longer demotes the verdict - `pass`, not `pass_with_issues`, `warning_count == 0`.
+- Confirmed the existing `pass_with_issues` test (a real `action="fill"` Playwright failure - a genuine site-side flake) is untouched and still correctly demotes the verdict, proving the fix discriminates between the two rather than suppressing all warnings.
+- Deliberately left the raw "Actions attempted / Pass rate" stats in the report unchanged - those are a technical execution-accuracy stat (fair to include every real attempt, hiccups included), distinct from the verdict, which is specifically a claim about the site's own behavior.
+- Full backend suite (220 tests, +1) passes.
+- **Not yet completed:** doesn't retroactively fix already-generated reports/history - this only changes verdicts for runs going forward from this fix.
