@@ -60,6 +60,57 @@ def _pass_with_issues_run(domain="practice_software_testing", workflow="login", 
     return RunResult(exploration=exploration, verification=verification)
 
 
+def test_error_message_ignores_broken_input_probe_failures():
+    # Reproduces a real report bug: a deliberate broken-input probe failed
+    # with an unrelated LLM error, and a genuine, real assertion failure on
+    # the actual workflow got mislabeled with the probe's error instead of
+    # its own - the probe is *supposed* to fail sometimes and its error has
+    # nothing to do with why the real workflow's outcome didn't match.
+    exploration = ExplorationResult(
+        ticket_id="T1", domain="automation_exercise", workflow="contact_us", completed=True,
+        actions=[
+            ActionLogEntry(
+                step="Enter a message", action="fill", success=False,
+                error="Claude's response contained no text content.", is_broken_input_attempt=True,
+            ),
+            ActionLogEntry(step="Click Submit", action="click", success=True),
+        ],
+        final_url="https://x/contact_us", final_page_text="Get In Touch",
+    )
+    verification = VerifierResult(
+        ticket_id="T1", domain="automation_exercise", workflow="contact_us", verdict="fail",
+        assertion_checked={"text_contains": "Success!"}, initial_check_passed=False, retried=True,
+        retry_passed=False, retry_error=None,
+    )
+
+    error_message = ReporterAgent._error_message(exploration, verification)
+
+    assert error_message is None
+
+
+def test_error_message_still_reports_a_real_failed_action_alongside_a_probe():
+    exploration = ExplorationResult(
+        ticket_id="T1", domain="automation_exercise", workflow="contact_us", completed=True,
+        actions=[
+            ActionLogEntry(
+                step="Enter a message", action="fill", success=False,
+                error="Claude's response contained no text content.", is_broken_input_attempt=True,
+            ),
+            ActionLogEntry(step="Click Submit", action="click", success=False, error="Timed out waiting for '#submit'"),
+        ],
+        final_url="https://x/contact_us", final_page_text="Get In Touch",
+    )
+    verification = VerifierResult(
+        ticket_id="T1", domain="automation_exercise", workflow="contact_us", verdict="fail",
+        assertion_checked={"text_contains": "Success!"}, initial_check_passed=False, retried=True,
+        retry_passed=False, retry_error=None,
+    )
+
+    error_message = ReporterAgent._error_message(exploration, verification)
+
+    assert error_message == "Timed out waiting for '#submit'"
+
+
 async def test_report_generates_low_severity_finding_for_pass_with_issues(reporter, monkeypatch):
     async def fake_post_summary(ticket_id, summary_text):
         return {"ok": True}

@@ -114,7 +114,11 @@ class ReporterAgent:
             return verification.retry_error
         if exploration.error:
             return exploration.error
-        failed_actions = [a for a in exploration.actions if not a.success and a.error]
+        # Excludes deliberate broken-input probes, same as Verifier's own
+        # _count_errors - a probe is *supposed* to fail, so its error is
+        # never the reason a real, unrelated assertion failed and showing
+        # it here would misattribute the cause of a genuine finding.
+        failed_actions = [a for a in exploration.actions if not a.success and a.error and not a.is_broken_input_attempt]
         return failed_actions[-1].error if failed_actions else None
 
     @staticmethod

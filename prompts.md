@@ -570,3 +570,25 @@ Running log of significant AI prompts used to build this project, per the intern
 - New tests: a response with only a non-text block and `stop_reason="max_tokens"` raises the enriched "cut off by max_tokens" message; the same response shape with a different `stop_reason` (`end_turn`) does *not* get that hint, confirming it's only shown when actually diagnosable rather than guessed at.
 - Full backend suite (211 tests, +2) passes.
 - **Not yet completed:** this fixes the *symptom* (too little budget, unhelpful error) but the underlying question of exactly why Claude sometimes spends tokens on non-text content before the real answer here is still open - worth another real run to confirm 600 tokens is enough headroom, and worth revisiting if the same error resurfaces even at the higher budget.
+
+---
+
+## A passing workflow reported as FAIL, blamed on an unrelated probe error
+
+**Context:** After the max_tokens fix above, a real Automation Exercise `contact_us` run came back FAIL with 100% of the actual workflow's actions passing (6/6) - the finding's "Error message" read `Claude's response contained no text content`, the same string from the previous round's fix, which made it look like the fix hadn't worked. It had; this was a second, different bug hiding behind the first.
+
+**Prompt:** shared the new report card directly, no further comment needed - the contradiction (100% actions passed, verdict FAIL, an LLM error as the stated cause) was the whole signal.
+
+**What was found (two separate bugs):**
+1. `backend/app/agents/reporter.py`'s `_error_message()` picked the *last failed action's error* as the fallback reason for a finding, with no filter for `is_broken_input_attempt`. The workflow's own deliberate negative-input probe (which is *supposed* to sometimes fail/error, and is correctly excluded from `verification.warning_count` by `verifier.py`'s own `_count_errors`) had itself hit the "no text content" LLM error - and because it was the *last* failed action in the log, its unrelated error got surfaced as the reason a completely different, real assertion failure happened.
+2. `backend/app/browser.py` never handled JS `dialog` events. Automation Exercise's real Contact Us form gates its submission behind a native `confirm()` dialog - Playwright auto-dismisses (cancels) any dialog with no listener, so the Explorer's click on Submit genuinely succeeds but the page never reaches its actual result, and the real "Success!" assertion correctly fails for a reason that has nothing to do with the workflow being wrong.
+
+**What was generated:**
+- `reporter.py`'s `_error_message()` now excludes `is_broken_input_attempt` actions from its fallback, matching `verifier.py`'s existing convention exactly.
+- `browser.py`'s `BrowserSession.start()` now registers a `page.on("dialog", ...)` handler that accepts every dialog - the closest match to what a real user clicking "OK" would do.
+
+**What was checked/modified before accepting:**
+- Couldn't reach automationexercise.com from this sandbox to verify the dialog theory live (network policy blocks general external browsing here) - built a local HTML fixture (`tests/e2e/fixtures/confirm_dialog_form.html`) reproducing the exact same confirm-then-reveal-success pattern instead, and proved it both ways: with the fix reverted, the new e2e test genuinely times out waiting for the success text (confirming the dialog really was blocking it); with the fix in, it passes.
+- New unit tests for `_error_message`: a broken-input-probe-only failure returns `None` (not the probe's own error); a probe failure *alongside* a real failed action still correctly surfaces the real one.
+- Full backend suite (216 tests, +5, including the new real-browser e2e test) passes.
+- **Not yet completed:** the dialog fix is verified against a local fixture reproducing the pattern, not the live site itself, since this sandbox can't reach it - worth confirming on your next real Automation Exercise Contact Us run that the success message now actually appears.

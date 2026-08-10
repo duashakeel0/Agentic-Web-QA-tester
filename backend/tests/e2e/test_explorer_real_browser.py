@@ -11,9 +11,29 @@ import pytest
 from app.agents.explorer import ExplorerAgent
 from app.agents.schema import TestPlan
 from app.agents.verifier import VerifierAgent
+from app.browser import BrowserSession
 from tests.helpers import FakeLLM
 
 pytestmark = pytest.mark.e2e
+
+
+async def test_real_browser_auto_accepts_a_confirm_dialog_on_submit(fixture_server):
+    # Reproduces a real quirk on Automation Exercise's Contact Us form:
+    # submission is gated behind a native confirm() dialog. Unhandled,
+    # Playwright auto-cancels it, so the click reports success but the
+    # page never reaches its actual result - a real assertion then fails
+    # for a reason that has nothing to do with the workflow being wrong.
+    session = BrowserSession()
+    await session.start()
+    try:
+        await session.goto(f"{fixture_server}/confirm_dialog_form.html")
+        await session.page.fill("#message", "hello")
+        await session.page.click("#submit-btn")
+        await session.page.wait_for_selector("#success", state="visible", timeout=5000)
+        text = await session.page.evaluate("() => document.body.innerText")
+        assert "Success! Your details have been submitted successfully." in text
+    finally:
+        await session.close()
 
 
 def _plan(base_url_placeholder_domain: str) -> TestPlan:

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Fixture Confirm-Dialog Form</title>
+</head>
+<body>
+  <form id="contact-form">
+    <input id="message" name="message" type="text" placeholder="Message" />
+    <button id="submit-btn" type="submit">Submit</button>
+  </form>
+  <div id="success" style="display: none;">Success! Your details have been submitted successfully.</div>
+
+  <script>
+    document.getElementById("contact-form").addEventListener("submit", function (event) {
+      event.preventDefault();
+      // Reproduces a real quirk seen on Automation Exercise's Contact Us
+      // form: submission is gated behind a native confirm() dialog, which
+      // Playwright auto-dismisses (cancels) unless something explicitly
+      // accepts it - a real user clicking "OK" would proceed, so a
+      // successful automated run needs to behave the same way.
+      if (window.confirm("Press OK to proceed!")) {
+        document.getElementById("contact-form").style.display = "none";
+        document.getElementById("success").style.display = "block";
+      }
+    });
+  </script>
+</body>
+</html>
