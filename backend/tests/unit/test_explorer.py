@@ -1,5 +1,6 @@
 import asyncio
 import contextlib
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,9 +27,11 @@ _SNAPSHOT_ELEMENTS = [
 class _FakeBrowser:
     """Just enough of BrowserSession's shape for tests that never actually
     need a real page - _execute_action reads .page before its guard
-    clauses run, so it must exist even when unused."""
+    clauses run, so it must exist even when unused. .url matches
+    _fake_snapshot's "http://x" so the click-navigation completion check
+    sees no URL change by default, same as before that check existed."""
 
-    page = object()
+    page = SimpleNamespace(url="http://x")
 
 
 class _FakeLocator:
@@ -238,6 +241,37 @@ async def test_execute_step_completes_when_repeating_an_already_succeeded_action
     # instead of being re-attempted or tripping the loop guard.
     assert len(actions) == 1
     assert actions[0].success is True
+
+
+async def test_execute_step_completes_when_a_click_navigates_to_a_new_page():
+    # Reproduces a real ParaBank failure: the login click succeeded and
+    # navigated to the Accounts Overview page, but the loop asked the
+    # model again anyway with that new page's elements - which included
+    # its own "Log Out" link. Llama clicked it, undoing the login it had
+    # just completed, and the workflow ended up back at the logged-out
+    # homepage instead of Accounts Overview. A successful click that
+    # actually changed the URL should end the step immediately instead of
+    # handing the model an unrelated new page to act on.
+    fake_browser = _FakeBrowserWithScreenshot()
+    agent = ExplorerAgent(browser=fake_browser, llm=FakeLLM())
+    agent._llm.queue('{"action": "click", "selector": "#loginButton", "value": null, "reasoning": "log in"}')
+    # Queued so that if the loop wrongly asks again, this gets consumed
+    # and the bug (a second, unwanted action) would actually reproduce
+    # instead of the test just failing on an empty queue.
+    agent._llm.queue('{"action": "click", "selector": "text=\\"Log Out\\"", "value": null, "reasoning": "click it"}')
+    agent._snapshot = _fake_snapshot
+
+    async def _navigate_on_click(action, selector, value):
+        fake_browser.page.url = "http://x/overview.htm"
+        return True, None
+
+    agent._execute_action = _navigate_on_click
+
+    actions: list[ActionLogEntry] = []
+    await agent._execute_step("Click the Log In button", actions)
+
+    assert len(actions) == 1
+    assert actions[0].selector == "#loginButton"
 
 
 async def test_execute_step_raises_after_max_actions_without_done(explorer):

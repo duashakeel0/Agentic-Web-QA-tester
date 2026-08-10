@@ -611,3 +611,23 @@ Running log of significant AI prompts used to build this project, per the intern
 - New test for the exact reported scenario: a step that needed a retry before succeeding, inside a completed exploration, no longer surfaces that retry's error.
 - Full backend suite (217 tests, +2 net) passes.
 - **Not yet completed:** the underlying JSON-truncation itself (this time in the `reasoning` field) still happens occasionally even at the higher token budget from the previous round - harmless now since the retry loop absorbs it and the step still completes, but worth another bump to `DECISION_MAX_TOKENS` if it keeps costing extra action attempts (this run took 14 model calls / ~$0.12 for a 4-step workflow, higher than it should need).
+
+---
+
+## A successful login immediately undone by a spurious "Log Out" click
+
+**Context:** A real ParaBank login run on Llama (Ollama) showed all 4 steps PASS (100% action accuracy), yet the verdict was FAIL, HIGH, citing "click on text='Log Out'" - a selector never mentioned in the workflow's own steps at all.
+
+**Prompt:** "no keep it here loo we passed all steps but test failed" (with the report).
+
+**What was found:** a genuinely new failure class, not a repeat of the two reporting-attribution bugs from the last two rounds. `_execute_step`'s loop unconditionally calls the model again after every successful action until it says "done" - including after a click that actually navigated to a new page. The real sequence: the login click succeeded and landed on ParaBank's Accounts Overview page; the loop asked the model again anyway, handing it a snapshot of that *new* page's elements (which include a normal "Log Out" link); Llama treated that as something it still needed to click, undoing the login it had just completed. The workflow ended up back at the logged-out homepage - a real, self-inflicted failure, not misreporting.
+
+**What was generated:**
+- `backend/app/agents/explorer.py` - `_execute_step()` now ends a step immediately after a successful `click` action that changed the page's URL, without asking the model again. This is a deterministic check (compares the URL before and after the click), matching the same "don't trust a weaker model to reliably say 'done'" philosophy already used for the redundant-navigate and repeated-action cases earlier in this file.
+- No frontend change needed: `ReportCard.tsx`'s "Failed step" line reads `reproduction_steps.at(-1)` from the real action log - since the erroneous extra click can no longer happen, that log never contains it, and the misleading display is fixed at the source instead of patched at the display layer.
+
+**What was checked/modified before accepting:**
+- New unit test reproducing the exact scenario: a successful click that changes the URL ends the step at one action, even when a second (wrong) decision is already queued and would otherwise be consumed - proving the loop actually stops, not just that the assertion happens to pass.
+- The shared `_FakeBrowser` test fixture's bare `page = object()` had no `.url` - needed one (matching `_fake_snapshot`'s URL, so existing tests' behavior is unchanged) for the new check to even run without crashing every other click-based test.
+- Full backend suite (218 tests, +1) passes, including the real-browser e2e login test, which exercises this exact code path for real (a click that navigates) and still passes.
+- **Not yet completed:** scoped specifically to `click` actions, since `fill`/`select`/`press` steps essentially never cause navigation on their own - if a future workflow has a step needing multiple sequential clicks that each navigate, this would end the step after the first one; none of the current registered workflows are written that way, but worth knowing if one ever is.

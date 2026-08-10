@@ -542,6 +542,22 @@ class ExplorerAgent:
             actions.append(entry)
             step_actions.append(entry)
 
+            if success and action == "click" and not self._same_url(self._browser.page.url, snapshot["url"]):
+                # A successful click that actually navigated to a new page
+                # almost always means the step's real-world goal (submit a
+                # form, follow a link, log in) was just achieved - looping
+                # back to the model hands it a brand-new page it was never
+                # asked about, and a weaker model can mistake an unrelated
+                # element there for something it still needs to click. Real
+                # case this reproduces: a successful ParaBank login click
+                # landed on the Accounts Overview page, which has its own
+                # "Log Out" link - Llama took that as something to act on
+                # next and clicked it, undoing the login it had just
+                # completed. Checked deterministically rather than relying
+                # on the model reliably answering "done" itself once the
+                # goal's already met.
+                return
+
         raise ExplorerError(f"Explorer could not complete step {step!r} within {MAX_ACTIONS_PER_STEP} actions.")
 
     async def _attempt_broken_input(self, step: str, actions: list[ActionLogEntry]) -> None:
