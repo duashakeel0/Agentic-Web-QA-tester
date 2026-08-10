@@ -666,3 +666,19 @@ Running log of significant AI prompts used to build this project, per the intern
 - Deliberately left the raw "Actions attempted / Pass rate" stats in the report unchanged - those are a technical execution-accuracy stat (fair to include every real attempt, hiccups included), distinct from the verdict, which is specifically a claim about the site's own behavior.
 - Full backend suite (220 tests, +1) passes.
 - **Not yet completed:** doesn't retroactively fix already-generated reports/history - this only changes verdicts for runs going forward from this fix.
+
+---
+
+## A real, silently-skipped required field - not another reporting artifact
+
+**Context:** A real ParaBank Pay Bill run genuinely FAILED (HIGH severity): step 13, "Enter '12345' to verify account number," failed both of its attempts with "Claude's response contained no text content (cut off by max_tokens before any text was produced...)," and the exploration moved straight to steps 14-15 without that required field ever being filled - so ParaBank's own form validation correctly refused the payment and never showed "Bill Payment Complete." Pasted with no extra commentary.
+
+**What was found:** unlike the last three rounds, this is not a misattribution bug - the reported failure is real and the site behaved correctly. The root issue is `DECISION_MAX_TOKENS` (600, from the very first round this phase) still being too tight for Claude under some prompts. The mechanism is worse than just "occasionally needs a retry": under a tight budget, a *short* decision (`{"action":"done",...}`) is far more likely to fit than a *longer* one (`{"action":"fill","selector":...,"value":...,"reasoning":...}`) - the JSON schema itself makes truncation asymmetric. So a truncation doesn't just cost a noisy retry; it can systematically bias the model toward claiming a step is already "done" instead of ever actually performing the fill. That's exactly consistent with step 13 being abandoned rather than eventually completed on retry.
+
+**What was generated:**
+- `backend/app/agents/explorer.py` - `DECISION_MAX_TOKENS` raised from 600 to 1200, with the comment updated to record the asymmetric-truncation theory and the real ParaBank evidence for it, so the reasoning survives the next person who's tempted to lower it back for cost reasons.
+
+**What was checked/modified before accepting:**
+- Grepped for any test hardcoding the old value - none found; this is a pure threshold change with no test fixture to update.
+- Full backend suite (220 tests, no change) passes.
+- **Not yet completed:** this is a budget increase, not a structural fix - the same failure mode is still theoretically possible at 1200 tokens for an unusually verbose response, just far less likely in practice. If it recurs, the next real fix would be more structural (e.g. a strict low-token retry that forces a minimal-field decision) rather than another round of raising the ceiling.
