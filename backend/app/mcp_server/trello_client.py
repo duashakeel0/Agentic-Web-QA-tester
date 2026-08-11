@@ -30,6 +30,25 @@ def _raise_for_status(response: httpx.Response, *, not_found_message: str) -> No
         raise TrelloError(f"Trello returned an unexpected error (status {response.status_code}).")
 
 
+async def verify_trello_credentials(api_key: str, token: str) -> None:
+    """Confirms a candidate API key/token actually work against Trello's
+    real API before they're trusted and saved - previously any non-empty
+    strings (a placeholder, a typo, someone's dashboard login pasted in
+    by habit) were accepted and shown as "connected" with no check at
+    all, only failing later on the first real ticket run."""
+    params = {"key": api_key, "token": token}
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{TRELLO_BASE_URL}/members/me", params=params)
+    except httpx.RequestError:
+        raise TrelloError("Could not reach Trello to verify these credentials - check your network connection and try again.")
+
+    if response.status_code == 401:
+        raise TrelloError("Trello rejected this API key/token - double check they're copied correctly from Trello's own page.")
+    if not response.is_success:
+        raise TrelloError(f"Trello returned an unexpected error while verifying these credentials (status {response.status_code}).")
+
+
 class TrelloClient:
     def __init__(self) -> None:
         # Credentials saved from the dashboard's Trello Settings page take

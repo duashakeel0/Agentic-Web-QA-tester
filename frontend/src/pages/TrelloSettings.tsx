@@ -14,6 +14,26 @@ const SOURCE_LABEL: Record<TrelloStatus["source"], string> = {
   none: "Not connected",
 };
 
+// Trello's own "authorize" redirect: no client secret needed, just the API
+// key identifying this app. The user logs into Trello and approves on
+// Trello's own page - their real Trello password never touches this app -
+// then gets sent back here with the token appended as a URL fragment
+// (#token=..., never sent to any server, only readable by this page's own
+// JS), which is what removes the need to manually copy a token at all.
+const PENDING_API_KEY_STORAGE_KEY = "trello_connect_pending_api_key";
+
+function buildAuthorizeUrl(apiKey: string): string {
+  const params = new URLSearchParams({
+    expiration: "never",
+    scope: "read,write",
+    response_type: "token",
+    key: apiKey,
+    return_url: `${window.location.origin}/trello-settings`,
+    name: "ProTester",
+  });
+  return `https://trello.com/1/authorize?${params.toString()}`;
+}
+
 /** Lets a Trello API key/token be set up entirely from the dashboard
  * instead of requiring backend .env file access - closes the gap a
  * hosted, non-technical user would otherwise hit. One shared connection
@@ -43,6 +63,49 @@ function TrelloSettings() {
   }
 
   useEffect(load, []);
+
+  // Runs once, right after Trello redirects back here post-approval - the
+  // token it granted arrives as a URL fragment (#token=...), which only
+  // this page's own JS can read (browsers never send fragments to any
+  // server). The API key that started the redirect doesn't survive the
+  // round trip on its own, so it was stashed in sessionStorage first.
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (!hash.startsWith("#token=")) return;
+
+    const tokenFromTrello = decodeURIComponent(hash.slice("#token=".length));
+    const pendingApiKey = sessionStorage.getItem(PENDING_API_KEY_STORAGE_KEY);
+    window.history.replaceState(null, "", window.location.pathname);
+    sessionStorage.removeItem(PENDING_API_KEY_STORAGE_KEY);
+
+    if (!pendingApiKey) {
+      setFormError(
+        "Trello approved the connection, but the API key used to start it was lost - enter it again below and " +
+          "click Connect with Trello.",
+      );
+      return;
+    }
+
+    setSubmitting(true);
+    apiPost<TrelloStatus>("/api/trello/settings", { api_key: pendingApiKey, token: tokenFromTrello })
+      .then(() => {
+        setSuccessMessage("Trello connected - tickets from your board can be run right away, no restart needed.");
+        load();
+      })
+      .catch((err) => setFormError(err instanceof ApiError ? err.message : "Could not save the connection Trello approved."))
+      .finally(() => setSubmitting(false));
+  }, []);
+
+  function handleConnectWithTrello() {
+    setFormError(null);
+    setSuccessMessage(null);
+    if (!apiKey.trim()) {
+      setFormError("Enter your API key first, then click Connect with Trello.");
+      return;
+    }
+    sessionStorage.setItem(PENDING_API_KEY_STORAGE_KEY, apiKey.trim());
+    window.location.href = buildAuthorizeUrl(apiKey.trim());
+  }
 
   async function handleSubmit(event: FormEvent) {
     event.preventDefault();
@@ -105,6 +168,27 @@ function TrelloSettings() {
                 autoComplete="off"
               />
             </label>
+            <a
+              className="ts-trello-link"
+              href="https://trello.com/app-key"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Get your API key from Trello <ExternalLink size={12} aria-hidden="true" />
+            </a>
+
+            <button type="button" className="ts-connect" onClick={handleConnectWithTrello} disabled={submitting}>
+              Connect with Trello
+            </button>
+            <p className="ts-connect-hint">
+              Opens Trello - log in there and click Allow, and you'll be brought straight back here, connected. Your
+              Trello password never touches this app.
+            </p>
+
+            <div className="ts-divider">
+              <span>or paste a token you already have</span>
+            </div>
+
             <label className="ts-field">
               <span>Token</span>
               <input
@@ -115,14 +199,6 @@ function TrelloSettings() {
                 autoComplete="off"
               />
             </label>
-            <a
-              className="ts-trello-link"
-              href="https://trello.com/app-key"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Get your API key and token from Trello <ExternalLink size={12} aria-hidden="true" />
-            </a>
 
             {formError && <p className="ts-error">{formError}</p>}
             {successMessage && <p className="ts-success">{successMessage}</p>}

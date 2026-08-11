@@ -46,6 +46,7 @@ from app.history.schema import (
     SiteStats,
 )
 from app.history.store import HistoryStore
+from app.mcp_server.trello_client import TrelloError, verify_trello_credentials
 from app.pdf_report import generate_report_pdf
 from app.scheduler import SmokeScheduler, list_smoke_workflows
 from app.trello_settings import clear_trello_settings, load_trello_settings, save_trello_settings
@@ -205,6 +206,15 @@ async def run_pipeline_ws(websocket: WebSocket, token: str = Depends(require_aut
         if model not in VALID_MODELS:
             await websocket.send_json(
                 {"type": "error", "message": f"Unknown model {model!r} - expected claude, ollama, or both."}
+            )
+            return
+        if not _trello_status().connected:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": "Trello isn't connected yet - every ticket run reads its details from Trello, "
+                    "so connect it from Trello Settings first.",
+                }
             )
             return
 
@@ -468,11 +478,18 @@ async def save_trello_credentials(body: TrelloSettingsIn, _token: str = Depends(
     requiring a backend .env file - the gap a hosted, non-technical user
     would otherwise hit with no filesystem access. One shared connection
     at a time (this app has one login, not per-user accounts) - saving a
-    new one replaces whatever was previously connected."""
+    new one replaces whatever was previously connected. Verified against
+    Trello's real API before being saved - a typo or a placeholder value
+    would otherwise silently "connect" until the first real ticket run
+    failed on it."""
     api_key = body.api_key.strip()
     token = body.token.strip()
     if not api_key or not token:
         raise HTTPException(status_code=400, detail="Both an API key and a token are required.")
+    try:
+        await verify_trello_credentials(api_key, token)
+    except TrelloError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     save_trello_settings(api_key, token)
     return _trello_status()
 

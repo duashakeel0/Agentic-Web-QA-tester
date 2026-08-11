@@ -136,6 +136,35 @@
   font-size: 13.5px;
 }
 
+.run-test-connect-trello {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 1.25rem;
+  border: 1px solid color-mix(in srgb, var(--status-warning) 35%, var(--border));
+  background: var(--status-warning-bg);
+  border-radius: var(--radius-control);
+  padding: 0.75rem 1rem;
+  color: var(--text);
+  font-size: 13.5px;
+}
+
+.run-test-connect-trello span {
+  flex: 1;
+}
+
+.run-test-connect-trello-link {
+  flex-shrink: 0;
+  border-radius: var(--radius-control);
+  padding: 0.4rem 0.9rem;
+  background: var(--status-warning);
+  color: var(--bg);
+  font-weight: 600;
+  font-size: 13px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
 .run-test-section-title {
   font-size: 15px;
   margin: 0 0 0.75rem;
