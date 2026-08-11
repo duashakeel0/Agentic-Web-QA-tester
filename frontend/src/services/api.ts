@@ -44,6 +44,11 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
+export async function apiDelete<T>(path: string): Promise<T> {
+  const response = await apiFetch(path, { method: "DELETE" });
+  return (await response.json()) as T;
+}
+
 /** Downloads a binary response (e.g. the PDF report) through the same
  * authenticated fetch every other call uses, then hands the browser a
  * blob URL to save - a plain <a href> can't carry the auth header. */

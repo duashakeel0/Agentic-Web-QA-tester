@@ -48,6 +48,7 @@ from app.history.schema import (
 from app.history.store import HistoryStore
 from app.pdf_report import generate_report_pdf
 from app.scheduler import SmokeScheduler, list_smoke_workflows
+from app.trello_settings import clear_trello_settings, load_trello_settings, save_trello_settings
 
 load_dotenv()
 
@@ -432,6 +433,57 @@ async def add_domain_knowledge(body: DomainKnowledgeIn, _token: str = Depends(re
         expected_outcome=ExpectedOutcome(url_contains=url_contains, text_contains=text_contains),
     )
     return save_workflow(body.domain, body.base_url, workflow)
+
+
+class TrelloStatus(BaseModel):
+    connected: bool
+    source: str  # "settings" | "env" | "none" - where the active credentials (if any) come from
+
+
+class TrelloSettingsIn(BaseModel):
+    api_key: str
+    token: str
+
+
+def _trello_status() -> TrelloStatus:
+    if load_trello_settings() is not None:
+        return TrelloStatus(connected=True, source="settings")
+    if os.environ.get("TRELLO_API_KEY") and os.environ.get("TRELLO_TOKEN"):
+        return TrelloStatus(connected=True, source="env")
+    return TrelloStatus(connected=False, source="none")
+
+
+@app.get("/api/trello/status", response_model=TrelloStatus)
+async def trello_status(_token: str = Depends(require_auth)) -> TrelloStatus:
+    """Whether Trello is currently connected, and where the active
+    credentials came from - never returns the key/token themselves, only
+    whether something's configured, so a secret is never sent back down
+    to the browser after being saved."""
+    return _trello_status()
+
+
+@app.post("/api/trello/settings", response_model=TrelloStatus)
+async def save_trello_credentials(body: TrelloSettingsIn, _token: str = Depends(require_auth)) -> TrelloStatus:
+    """Saves a Trello API key/token from the dashboard instead of
+    requiring a backend .env file - the gap a hosted, non-technical user
+    would otherwise hit with no filesystem access. One shared connection
+    at a time (this app has one login, not per-user accounts) - saving a
+    new one replaces whatever was previously connected."""
+    api_key = body.api_key.strip()
+    token = body.token.strip()
+    if not api_key or not token:
+        raise HTTPException(status_code=400, detail="Both an API key and a token are required.")
+    save_trello_settings(api_key, token)
+    return _trello_status()
+
+
+@app.delete("/api/trello/settings", response_model=TrelloStatus)
+async def disconnect_trello(_token: str = Depends(require_auth)) -> TrelloStatus:
+    """Disconnects the currently-saved Trello connection. Falls back to
+    TRELLO_API_KEY/TRELLO_TOKEN env vars afterward if those are set,
+    same as if nothing had ever been saved from the dashboard."""
+    clear_trello_settings()
+    return _trello_status()
 
 
 class SmokeWorkflowOut(BaseModel):
