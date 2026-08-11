@@ -906,3 +906,20 @@ Running log of significant AI prompts used to build this project, per the intern
 **What was checked/modified before accepting:**
 - Every claim in the new README was checked against real files, not assumed: nav items grepped from `DashboardLayout.tsx`, endpoints grepped from `main.py`, env vars read from `backend/.env.example`, lint/test commands cross-checked against `frontend/package.json`'s actual `scripts` block (`oxlint` takes no path argument, corrected after first draft used one).
 - No code changes involved - documentation only, so no test suite to re-run.
+
+---
+
+## Removing the Ask-the-Site search bar - redundant with the global chat assistant
+
+**Context:** a screenshot showed the topbar's "Ask about a site…" search bar mid-query ("Browsing… click on text='About Us'") right next to the existing global chat bubble - two separate ways to ask a question about a site, on the same screen. Asked directly: "remove this / we alr have AI chatbot built in." Confirmed via `AskUserQuestion` whether to just unmount the UI or delete the whole Day 10 feature outright - answer was full removal, not just hiding it.
+
+**What was removed, end to end, not just hidden:**
+- Backend: `ExplorerAgent.ask()` and its four private helpers (`_match_domain_for_question`, `_answer_from_context`, `_ask_live`, `_ask_prompt`) and the `ASK_MAX_ACTIONS` constant, all from `explorer.py`; the `/ws/ask-site` WebSocket endpoint from `main.py`; the `AskContext`/`AskResult` Pydantic models from `schema.py`. Left `/api/history/{run_id}/ask` (`AskRequest`/`AskResponse`) completely untouched - that's a different, older, unrelated feature (asks about one finished run's *stored* report, no live browsing) that happens to share the word "ask."
+- Frontend: `AskSiteBar.tsx`/`.css`, `useAskSite.ts`, `types/asksite.ts` deleted outright; unmounted from `DashboardLayout.tsx`'s topbar; `getAskSiteSocketUrl()` removed from `api.ts`; the `actionsLog`/`baseUrls` state `usePipelineRun.ts` had added specifically to feed the search bar's "richer context" (and their wiring in `reset()`, `start()`, and the `action` event handler) removed too, since nothing else ever consumed them.
+- Tests: `test_explorer_ask.py`, `test_ws_ask_site.py`, `test_ask_site_real_browser.py`, `AskSiteBar.test.tsx` all deleted (not just the feature they tested).
+- README's architecture diagram and feature list updated to drop the search bar mention.
+
+**What was checked before accepting:**
+- Grepped the whole repo (case-insensitive) for every ask-site-specific symbol (`AskSiteBar`, `AskContext`, `AskResult`, `_ask_live`, `getAskSiteSocketUrl`, etc.) after the removal - zero hits outside `prompts.md`'s own historical log of building the feature in the first place.
+- Explicitly verified `/api/history/{run_id}/ask` and its `AskRequest`/`AskResponse` models were left alone - the shared "ask" naming made it easy to over-delete, so checked this feature's own tests still exist and weren't touched.
+- Full backend suite (255 tests, -24 net) and frontend suite (43 tests, -4 net) pass; `tsc --noEmit` and `oxlint` clean (only the two pre-existing, unrelated fast-refresh warnings).

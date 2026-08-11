@@ -8,7 +8,7 @@ This is a Phase 3 capstone project for an AI-focused internship (Arbisoft). Full
 
 ```mermaid
 flowchart TB
-    User([User]) --> Dashboard["React Dashboard\n(live view, chat, search bar)"]
+    User([User]) --> Dashboard["React Dashboard\n(live view, chat)"]
     Dashboard <-->|WebSocket| Backend["FastAPI Backend"]
 
     Backend --> Planner["Planner Agent"]
@@ -45,8 +45,7 @@ Every run can be executed with **Claude alone or Claude + a local/hosted Llama m
 - **Domain Knowledge** — save reusable, site-specific workflows (login, checkout, etc.) per domain so the Planner has real, human-verified context to test against instead of guessing blind on every run.
 - **Trello Settings** — connect a Trello API key/token from the dashboard itself; falls back to a backend `.env` file if nothing's saved from the UI, so both a hosted, non-technical setup and a local dev setup work the same way.
 - **Scheduler** — a fixed subset of each domain's workflows (marked `smoke: true`) can run unattended on an interval (nightly, hourly, etc.) via APScheduler, or be triggered on demand from the dashboard, so a regression surfaces on its own instead of waiting for the next real ticket.
-- **Ask the site** — a natural-language question bar that asks the live site something directly ("what happens if I submit the form empty?") and gets back a real, browser-verified answer, not a guess from the model's training data.
-- **Global chat assistant** — answers questions about how the project itself works (grounded in real, current run history) and can kick off a new ticket run from plain language ("run ticket ABC123").
+- **Global chat assistant** — answers questions about how the project itself works or about a live site directly (grounded in real, current run history), and can kick off a new ticket run from plain language ("run ticket ABC123").
 - **History, Analytics, and Model Comparison** — every run is stored with full step-by-step evidence (screenshots, timings, verdicts), a professional PDF report can be generated per run, and Claude-vs-Ollama/Groq runs on the same ticket are shown side by side.
 
 ## Frontend structure

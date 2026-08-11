@@ -17,7 +17,6 @@ import {
   ShieldCheck,
   Sun,
 } from "lucide-react";
-import AskSiteBar from "../components/AskSiteBar";
 import { useAuth } from "../contexts/AuthContext";
 import { useAppTheme } from "../hooks/useAppTheme";
 import { apiGet } from "../services/api";
@@ -177,7 +176,6 @@ function DashboardLayout({ children }: { children: ReactNode }) {
               onChange={(event) => setSearch(event.target.value)}
             />
           </form>
-          <AskSiteBar />
           <div className="topbar-actions">
             <button
               type="button"
