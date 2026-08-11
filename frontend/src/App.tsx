@@ -14,6 +14,7 @@ import HistoryReport from "./pages/HistoryReport";
 import LoginPage from "./pages/LoginPage";
 import RunTest from "./pages/RunTest";
 import Scheduler from "./pages/Scheduler";
+import TrelloSettings from "./pages/TrelloSettings";
 
 function ProtectedDashboard({ children }: { children: ReactNode }) {
   return (
@@ -88,6 +89,14 @@ function AppShell() {
           element={
             <ProtectedDashboard>
               <DomainKnowledge />
+            </ProtectedDashboard>
+          }
+        />
+        <Route
+          path="/trello-settings"
+          element={
+            <ProtectedDashboard>
+              <TrelloSettings />
             </ProtectedDashboard>
           }
         />

@@ -7,6 +7,8 @@ import os
 
 import httpx
 
+from app.trello_settings import load_trello_settings
+
 TRELLO_BASE_URL = "https://api.trello.com/1"
 
 
@@ -30,12 +32,21 @@ def _raise_for_status(response: httpx.Response, *, not_found_message: str) -> No
 
 class TrelloClient:
     def __init__(self) -> None:
-        self.api_key = os.environ.get("TRELLO_API_KEY")
-        self.token = os.environ.get("TRELLO_TOKEN")
+        # Credentials saved from the dashboard's Trello Settings page take
+        # precedence - falls back to TRELLO_API_KEY/TRELLO_TOKEN env vars
+        # so an existing .env-based setup keeps working unchanged for
+        # anyone who never touches the settings page at all.
+        stored = load_trello_settings()
+        if stored is not None:
+            self.api_key = stored["api_key"]
+            self.token = stored["token"]
+        else:
+            self.api_key = os.environ.get("TRELLO_API_KEY")
+            self.token = os.environ.get("TRELLO_TOKEN")
         if not self.api_key or not self.token:
             raise TrelloError(
-                "TRELLO_API_KEY and TRELLO_TOKEN must be set as environment "
-                "variables before the Trello MCP server can be used."
+                "Trello isn't connected yet - set it up from the dashboard's Trello Settings page, "
+                "or set TRELLO_API_KEY and TRELLO_TOKEN as environment variables."
             )
 
     def _auth_params(self) -> dict:
