@@ -894,3 +894,15 @@ Running log of significant AI prompts used to build this project, per the intern
 - Searched both `backend/tests` and `frontend/src` for any hardcoded brand-name string assertions that a pure text rename could silently break - none found, so no test files needed changes.
 - Full backend suite: 270 of 279 pass; the 9 failures are pre-existing real-browser e2e tests (`test_ask_site_real_browser.py`, `test_explorer_real_browser.py`, `test_scheduler_real_browser.py`) failing on a missing Playwright browser executable in this environment - unrelated to the rename, which touched only string literals, no logic.
 - Full frontend suite: `tsc --noEmit` clean, `oxlint` clean (only two pre-existing, unrelated fast-refresh warnings), `vitest run` 47/47 passing.
+
+---
+
+## README refresh - catching up to the actual current project
+
+**Context:** the README was frozen at its Day 1/2 state (a fake `/api/mock-run` stub, an unpopulated `frontend/src/data/services` folder that was never actually built that way) and never updated as the project grew - it didn't mention the scheduler (Day 9), the "Ask the site" search bar (Day 10), Domain Knowledge, Trello Settings, or the Claude-vs-Ollama/Groq model comparison, all of which are real, shipped features by this point. Asked directly: "README — exists, but hasn't been updated to reflect Day 9 (scheduler), Day 10 (search bar), or Trello Settings. Needs a pass."
+
+**What was generated:** surveyed the actual current codebase first (`frontend/src/pages`, `backend/app`, `backend/app/agents`, `backend/app/mcp_server`, the real sidebar nav items in `DashboardLayout.tsx`, the real `/api/*` and `/ws/*` routes in `main.py`, `backend/.env.example`, `scheduler.py`'s docstring) rather than writing from memory, then rewrote the README: updated architecture diagram (scheduler is real APScheduler now, not a stub "hook"; Explorer's model is "Ollama / Groq," not Ollama-only), a new "What it does" feature list covering every shipped page (Domain Knowledge, Trello Settings, Scheduler, Ask the site, Global chat, History/Analytics/Model Comparison), corrected frontend folder tree to match what's actually there (`components`, `contexts`, `services`, no longer-fictional `shared-components`/`data/services`), an expanded tech stack (APScheduler, ReportLab, Groq), an updated "Why these models" section explaining the Ollama/Groq toggle and both-mode side-by-side comparison, and a full environment-variable + test-command reference matching the real `.env.example` and `package.json` scripts.
+
+**What was checked/modified before accepting:**
+- Every claim in the new README was checked against real files, not assumed: nav items grepped from `DashboardLayout.tsx`, endpoints grepped from `main.py`, env vars read from `backend/.env.example`, lint/test commands cross-checked against `frontend/package.json`'s actual `scripts` block (`oxlint` takes no path argument, corrected after first draft used one).
+- No code changes involved - documentation only, so no test suite to re-run.
