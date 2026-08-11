@@ -248,7 +248,7 @@ def build_pdf(entry: HistoryDetail, narrative: dict) -> bytes:
     verdict_color = _VERDICT_COLORS.get(verdict, _FAIL_COLOR)
 
     story = [
-        Paragraph("SentinelQA — QA Test Execution Report", h1),
+        Paragraph("ProTester — QA Test Execution Report", h1),
         Paragraph("Automated Functional Test, executed by an AI QA agent", subtitle),
         Paragraph(f"Report generated {_fmt_ts(time.time())}", styles["Normal"]),
         Spacer(1, 12),

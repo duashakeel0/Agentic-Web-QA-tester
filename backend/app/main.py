@@ -69,7 +69,7 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     smoke_scheduler.shutdown()
 
 
-app = FastAPI(title="SentinelQA", lifespan=_lifespan)
+app = FastAPI(title="ProTester", lifespan=_lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -675,7 +675,7 @@ def _system_facts_for_chat() -> str:
     time) instead of generic AI filler about QA tools in general."""
     domains = load_domains()
     domain_lines = "\n".join(f"- {d.name} ({d.base_url}): {', '.join(w.name for w in d.workflows)}" for d in domains)
-    return f"""SentinelQA is a four-agent AI QA testing pipeline:
+    return f"""ProTester is a four-agent AI QA testing pipeline:
 - Planner: reads a Trello ticket, matches it against the registered domain/workflow manifest below, builds a test plan.
 - Explorer: drives a real Playwright browser, deciding each next action from the live page state (not a fixed script).
 - Verifier: re-checks a flagged result once before it's accepted as confirmed.
@@ -746,7 +746,7 @@ async def chat(body: ChatRequest, _token: str = Depends(require_auth)) -> ChatRe
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     transcript = "\n".join(f"{m.role.capitalize()}: {m.content}" for m in body.history[-CHAT_HISTORY_LIMIT:])
-    prompt = f"""You are the assistant built into SentinelQA, an AI-powered QA testing dashboard. You can
+    prompt = f"""You are the assistant built into ProTester, an AI-powered QA testing dashboard. You can
 help with anything the user asks, not only QA/testing topics, AND you can answer accurately about how
 this exact system works using the real facts below - never invent architecture details not listed here.
 

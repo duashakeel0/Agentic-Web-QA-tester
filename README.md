@@ -1,4 +1,4 @@
-# Agentic Web QA Tester
+# ProTester
 
 An AI agent that tests a live website the way a QA engineer would: it reads a Trello ticket describing what needs testing, plans a targeted test, drives a real browser through it, verifies every finding before reporting it, and posts results back to the ticket.
 

@@ -12,7 +12,7 @@ import { expect, test } from "@playwright/test";
 const USERNAME = process.env.E2E_USERNAME || "admin";
 const PASSWORD = process.env.E2E_PASSWORD || "admin";
 
-test.describe("SentinelQA dashboard", () => {
+test.describe("ProTester dashboard", () => {
   test("logging in with the wrong password shows an error", async ({ page }) => {
     await page.goto("/login");
     await page.fill('input[type="text"]', USERNAME);

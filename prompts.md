@@ -880,3 +880,17 @@ Running log of significant AI prompts used to build this project, per the intern
 - New tests: `verdict.test.ts` (frontend) and `test_verdict_label_*` (backend `pdf_report`) directly cover the label mapping in isolation.
 - Full backend suite (261 tests, +2) and frontend suite (41 tests, +3) pass; `tsc --noEmit` and `oxlint` clean.
 - **Not yet completed:** the AI-written PDF narrative (Claude's own prose summary/analysis section) still describes the raw verdict word ("fail") in its own generation prompt - the visible badges/labels are now consistent, but Claude's free-form narrative text itself wasn't specifically instructed to avoid saying "the test failed" in its own words. Worth revisiting if a generated narrative reads inconsistently with the badge above it.
+
+---
+
+## Renaming the project from "SentinelQA" to "ProTester"
+
+**Context:** the mentor flagged that "SentinelQA" collides with an existing, already-published QA product name and needs to change before the project ships further. Asked for name suggestions with one explicit, load-bearing constraint: **"change name make sure whatever name u usggest its nt alr present"** - every candidate had to be actually verified as not already in use, not just plausible-sounding. Checked each candidate live via web search before presenting it; several were caught and dropped as already taken (QAgent, ScoutQA, QAman, Verifai, Testronaut, Siteproof) before they could repeat the exact "SentinelQA already exists" mistake. Final decision: **"no go with ProTester."**
+
+**What was generated:** every literal `"SentinelQA"` occurrence in the tracked codebase replaced with `"ProTester"` - the browser tab title (`frontend/index.html`), the sidebar brand name (`DashboardLayout.tsx`), the login page brand name (`LoginPage.tsx`), the empty-state copy in the global chat (`GlobalChat.tsx`), a CSS comment (`index.css`), the Playwright e2e suite's `test.describe` name (`dashboard.spec.ts`), the FastAPI app title and the `/api/chat` system prompt's opening line (`backend/app/main.py`), and the PDF report's title `Paragraph` (`backend/app/pdf_report.py`). Also updated `README.md`'s H1 from the generic "Agentic Web QA Tester" to the actual product name, since the mentor's checklist explicitly called for the new name to be reflected "throughout the project, README, and presentation."
+
+**What was checked/modified before accepting:**
+- Grepped the full repo for `SentinelQA` before starting (8 files, 10 occurrences) and again after every file was edited, confirming zero occurrences remain anywhere in the tracked codebase.
+- Searched both `backend/tests` and `frontend/src` for any hardcoded brand-name string assertions that a pure text rename could silently break - none found, so no test files needed changes.
+- Full backend suite: 270 of 279 pass; the 9 failures are pre-existing real-browser e2e tests (`test_ask_site_real_browser.py`, `test_explorer_real_browser.py`, `test_scheduler_real_browser.py`) failing on a missing Playwright browser executable in this environment - unrelated to the rename, which touched only string literals, no logic.
+- Full frontend suite: `tsc --noEmit` clean, `oxlint` clean (only two pre-existing, unrelated fast-refresh warnings), `vitest run` 47/47 passing.
