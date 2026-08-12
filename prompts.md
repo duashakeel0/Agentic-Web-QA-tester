@@ -946,6 +946,23 @@ Follow-up ask, in the user's words: "shldnt it work like we use our trello usern
 
 ---
 
+## Deployment prep: backend config for Railway (separate PR from the frontend one)
+
+**Context:** deciding on a hosting plan for the presentation - compared ngrok/Cloudflare Tunnel (free, but only reachable while a laptop stays on and running) against Railway (a real trial-based host, no laptop dependency) and Oracle Cloud's Always Free tier (genuinely free forever but with real friction: card required, idle-resource reclaim risk, capacity-limited signups) - landed on Railway's 30-day trial for the backend + Vercel/Netlify for the frontend, since the demo is next week and that window comfortably covers it. Asked explicitly for separate PRs for the frontend and backend deployment changes, and confirmed upfront that the actual account creation/deploy-button clicks on Railway's and Vercel's own dashboards has to happen on the user's end - this session can prepare and push the code changes, not sign into third-party hosting accounts.
+
+**What was found, before writing anything:** grepped the repo for any existing deployment config (Procfile, railway.json, vercel.json) - none existed. Two real gaps that would break a real deployment, not just missing config: `backend/app/main.py`'s CORS `allow_origins` was hardcoded to `http://localhost:5173` only, and `backend/requirements.txt` has no post-install step to fetch Playwright's actual Chromium binary, without which every browser-driven run would fail immediately on a fresh host.
+
+**What was generated (backend half):**
+- `backend/app/main.py` - `allow_origins` now includes `http://localhost:5173` (default, unchanged) plus any origins from a new comma-separated `ALLOWED_ORIGINS` env var, so a deployed frontend's real URL can be allowed without touching this file again.
+- `backend/railway.json` (new) - `build.buildCommand` runs `pip install -r requirements.txt && playwright install --with-deps chromium` (the actual browser binary, not just the Python package); `deploy.startCommand` runs `uvicorn app.main:app --host 0.0.0.0 --port $PORT`, reading Railway's dynamically-assigned port instead of the hardcoded 8000 used for local dev.
+- `backend/.env.example` - documented the new `ALLOWED_ORIGINS` var alongside the existing ones.
+
+**What was checked before accepting:**
+- Full backend suite (260 tests) still passes unchanged - the CORS default behavior (localhost:5173 only, nothing extra) is exactly what every existing test already implicitly relies on.
+- `ALLOWED_ORIGINS` is read once, at module import time (same as every other env-var-driven config in this file) - the existing test harness imports `app.main` once, early, before any per-test env var could apply, so a full automated test would need an awkward module reload for a two-line list comprehension. Verified directly instead: imported `app.main` fresh with `ALLOWED_ORIGINS` set to two comma-separated URLs (with stray whitespace) and confirmed the CORS middleware's actual configured `allow_origins` list came out correctly trimmed and combined with the default.
+
+---
+
 ## Deployment prep: frontend config for Vercel (separate PR from the backend one), plus a real production-build bug it surfaced
 
 **Context:** the other half of the Railway/Vercel deployment plan - the frontend's `API_BASE_URL` was hardcoded to `http://localhost:8000`, which would try to reach the presenter's own laptop even once deployed on Vercel and pointed at a real backend.
@@ -965,3 +982,15 @@ Follow-up ask, in the user's words: "shldnt it work like we use our trello usern
 - Grepped the whole frontend for any other `constructor(public|private|protected|readonly ...)` shorthand - none found, so no other file was silently carrying the same latent build failure.
 - `npm run build` (the actual Vercel/Netlify build command) now succeeds end to end; inspected the built `dist/assets/*.js` output directly and confirmed a test `VITE_API_BASE_URL` value passed at build time was genuinely baked into the bundle, not just accepted without effect.
 - Full frontend suite (49 tests), `tsc --noEmit`, and `oxlint` all still pass after the type/syntax fixes - confirmed these were pure type-level/syntax corrections with no behavior change.
+
+---
+
+## One last leftover "sentinelqa" the earlier rename sweep missed
+
+**Context:** spotted while reviewing `ReportCard.tsx` for the deployment PRs - the downloaded PDF report's filename still read `sentinelqa-report-...pdf`, missed by the earlier rename because it wasn't the literal string `"SentinelQA"` the original grep searched for.
+
+**What was found:** grepping specifically for the lowercase `sentinelqa` (not just the exact `SentinelQA` casing) turned up two matches, not one - the same filename pattern exists independently in both `frontend/src/components/ReportCard.tsx`'s download button and `backend/app/main.py`'s `/api/history/{run_id}/report.pdf` endpoint (the `Content-Disposition` filename actually served to the browser).
+
+**What was generated:** both changed to `protester-report-...pdf`.
+
+**What was checked before accepting:** grepped both `backend/` and `frontend/` for any remaining `sentinelqa` (case-insensitive) - zero hits; confirmed no test asserts the old filename string, so nothing else needed updating.

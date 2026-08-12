@@ -70,9 +70,14 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="ProTester", lifespan=_lifespan)
 
+# Comma-separated real origins (e.g. a deployed Vercel/Netlify frontend
+# URL) can be added via ALLOWED_ORIGINS without touching this file -
+# localhost:5173 stays allowed by default so local dev keeps working
+# unchanged whether or not the env var is set.
+_extra_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", *_extra_origins],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -341,7 +346,7 @@ async def get_history_report_pdf(run_id: int, _token: str = Depends(require_auth
         raise HTTPException(status_code=404, detail="Run not found.")
 
     pdf_bytes = await generate_report_pdf(entry)
-    filename = f"sentinelqa-report-{entry.ticket_id}-{run_id}.pdf"
+    filename = f"protester-report-{entry.ticket_id}-{run_id}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

@@ -93,7 +93,7 @@ function DownloadReportButton({ historyId, ticketId }: { historyId: number; tick
       onClick={async () => {
         setDownloading(true);
         try {
-          await downloadFile(`/api/history/${historyId}/report.pdf`, `sentinelqa-report-${ticketId}-${historyId}.pdf`);
+          await downloadFile(`/api/history/${historyId}/report.pdf`, `protester-report-${ticketId}-${historyId}.pdf`);
         } finally {
           setDownloading(false);
         }
