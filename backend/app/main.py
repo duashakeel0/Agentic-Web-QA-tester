@@ -346,7 +346,7 @@ async def get_history_report_pdf(run_id: int, _token: str = Depends(require_auth
         raise HTTPException(status_code=404, detail="Run not found.")
 
     pdf_bytes = await generate_report_pdf(entry)
-    filename = f"sentinelqa-report-{entry.ticket_id}-{run_id}.pdf"
+    filename = f"protester-report-{entry.ticket_id}-{run_id}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",

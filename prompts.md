@@ -960,3 +960,37 @@ Follow-up ask, in the user's words: "shldnt it work like we use our trello usern
 **What was checked before accepting:**
 - Full backend suite (260 tests) still passes unchanged - the CORS default behavior (localhost:5173 only, nothing extra) is exactly what every existing test already implicitly relies on.
 - `ALLOWED_ORIGINS` is read once, at module import time (same as every other env-var-driven config in this file) - the existing test harness imports `app.main` once, early, before any per-test env var could apply, so a full automated test would need an awkward module reload for a two-line list comprehension. Verified directly instead: imported `app.main` fresh with `ALLOWED_ORIGINS` set to two comma-separated URLs (with stray whitespace) and confirmed the CORS middleware's actual configured `allow_origins` list came out correctly trimmed and combined with the default.
+
+---
+
+## Deployment prep: frontend config for Vercel (separate PR from the backend one), plus a real production-build bug it surfaced
+
+**Context:** the other half of the Railway/Vercel deployment plan - the frontend's `API_BASE_URL` was hardcoded to `http://localhost:8000`, which would try to reach the presenter's own laptop even once deployed on Vercel and pointed at a real backend.
+
+**What was generated:**
+- `frontend/src/config.ts` - `API_BASE_URL` now reads `import.meta.env.VITE_API_BASE_URL` (a Vercel/Netlify build-time env var) first, falling back to `http://localhost:8000` unchanged for local dev - no code edit needed to point at a real deployed backend.
+- `frontend/.env.example` (new) - documents `VITE_API_BASE_URL`, noting it belongs in the hosting platform's own dashboard, not a committed file, since it changes per deployment.
+- `frontend/vercel.json` (new) - a catch-all rewrite to `index.html`, needed because this is a client-side-routed SPA (react-router) - without it, directly opening or refreshing a deep link like `/history` on Vercel 404s instead of loading the app.
+
+**What was found while verifying, not assumed fixed just because `tsc --noEmit` was clean:** this project's established verification routine only ever ran `tsc --noEmit` (a looser check) - `npm run build` (`tsc -b && vite build`, the actual command Vercel runs) had never once been exercised. Running it for real surfaced three genuine, pre-existing compile errors that would have broken the actual Vercel deployment, unrelated to this round's own change: `ReportCard.tsx`'s `buildStepRows()` was typed to take `ExplorationResult | undefined` while the real `PipelineResult.exploration` field is `ExplorationResult | null` (a real mismatch already tolerated only because `?.`-optional-chaining happened to handle `null` fine at runtime); and two test files' `constructor(public url: string)` TypeScript parameter-property shorthand, which isn't allowed under the project's `erasableSyntaxOnly` compiler option since it requires actual code generation, not pure type erasure. Confirmed these were pre-existing (not introduced by this round) by running the same build against the unmodified base branch first.
+
+**What was generated (the build fix):**
+- `ReportCard.tsx` - `buildStepRows()`'s `exploration` parameter widened to `ExplorationResult | null | undefined`, matching the real type it's actually called with.
+- `GlobalChat.test.tsx` and `PipelineRunContext.test.tsx` - `FakeWebSocket`'s constructor rewritten as an explicit `url: string` field + plain assignment in the constructor body, instead of the shorthand `constructor(public url: string)`.
+
+**What was checked before accepting:**
+- Grepped the whole frontend for any other `constructor(public|private|protected|readonly ...)` shorthand - none found, so no other file was silently carrying the same latent build failure.
+- `npm run build` (the actual Vercel/Netlify build command) now succeeds end to end; inspected the built `dist/assets/*.js` output directly and confirmed a test `VITE_API_BASE_URL` value passed at build time was genuinely baked into the bundle, not just accepted without effect.
+- Full frontend suite (49 tests), `tsc --noEmit`, and `oxlint` all still pass after the type/syntax fixes - confirmed these were pure type-level/syntax corrections with no behavior change.
+
+---
+
+## One last leftover "sentinelqa" the earlier rename sweep missed
+
+**Context:** spotted while reviewing `ReportCard.tsx` for the deployment PRs - the downloaded PDF report's filename still read `sentinelqa-report-...pdf`, missed by the earlier rename because it wasn't the literal string `"SentinelQA"` the original grep searched for.
+
+**What was found:** grepping specifically for the lowercase `sentinelqa` (not just the exact `SentinelQA` casing) turned up two matches, not one - the same filename pattern exists independently in both `frontend/src/components/ReportCard.tsx`'s download button and `backend/app/main.py`'s `/api/history/{run_id}/report.pdf` endpoint (the `Content-Disposition` filename actually served to the browser).
+
+**What was generated:** both changed to `protester-report-...pdf`.
+
+**What was checked before accepting:** grepped both `backend/` and `frontend/` for any remaining `sentinelqa` (case-insensitive) - zero hits; confirmed no test asserts the old filename string, so nothing else needed updating.
