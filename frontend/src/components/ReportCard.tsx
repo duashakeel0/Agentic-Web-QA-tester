@@ -36,7 +36,7 @@ interface StepRow {
  * actions at all is either "skipped" (already satisfied when the page
  * loaded, only possible for a completed run) or "not reached" (exploration
  * stopped before it). */
-function buildStepRows(plan: TestPlan, exploration: ExplorationResult | undefined, verdict: string | undefined): StepRow[] {
+function buildStepRows(plan: TestPlan, exploration: ExplorationResult | null | undefined, verdict: string | undefined): StepRow[] {
   const actions = exploration?.actions ?? [];
   const completed = exploration?.completed ?? false;
   const realActions = actions.filter((a: ActionLogEntry) => !a.is_broken_input_attempt);

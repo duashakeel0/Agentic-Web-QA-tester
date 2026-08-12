@@ -943,3 +943,25 @@ Follow-up ask, in the user's words: "shldnt it work like we use our trello usern
 - New backend tests: `verify_trello_credentials` unit tests (success, Trello-rejects, network error); a functional test confirming a save with credentials Trello itself rejects (`admin`/`admin123`, the exact real values from the screenshot) returns 400 and leaves the connection status untouched at "not connected"; a new `/ws/pipeline` test confirming a disconnected Trello state returns the specific error event and the pipeline (`run_pipeline`) is never actually invoked.
 - New frontend tests: Connect-with-Trello with no API key shows an inline error and never touches `sessionStorage`/navigates; with a key, it's stashed and `window.location.href` is built correctly; returning with a `#token=...` fragment and a stashed key auto-saves and clears both the fragment and the stashed key; returning with a token but no stashed key (lost across the redirect) shows an error instead of silently failing to save. `RunTest.tsx`: the connect prompt and disabled form appear when Trello isn't connected, and don't when it is.
 - Full backend suite (260 tests, +5) and frontend suite (49 tests, +6) pass; `tsc --noEmit` and `oxlint` clean.
+
+---
+
+## Deployment prep: frontend config for Vercel (separate PR from the backend one), plus a real production-build bug it surfaced
+
+**Context:** the other half of the Railway/Vercel deployment plan - the frontend's `API_BASE_URL` was hardcoded to `http://localhost:8000`, which would try to reach the presenter's own laptop even once deployed on Vercel and pointed at a real backend.
+
+**What was generated:**
+- `frontend/src/config.ts` - `API_BASE_URL` now reads `import.meta.env.VITE_API_BASE_URL` (a Vercel/Netlify build-time env var) first, falling back to `http://localhost:8000` unchanged for local dev - no code edit needed to point at a real deployed backend.
+- `frontend/.env.example` (new) - documents `VITE_API_BASE_URL`, noting it belongs in the hosting platform's own dashboard, not a committed file, since it changes per deployment.
+- `frontend/vercel.json` (new) - a catch-all rewrite to `index.html`, needed because this is a client-side-routed SPA (react-router) - without it, directly opening or refreshing a deep link like `/history` on Vercel 404s instead of loading the app.
+
+**What was found while verifying, not assumed fixed just because `tsc --noEmit` was clean:** this project's established verification routine only ever ran `tsc --noEmit` (a looser check) - `npm run build` (`tsc -b && vite build`, the actual command Vercel runs) had never once been exercised. Running it for real surfaced three genuine, pre-existing compile errors that would have broken the actual Vercel deployment, unrelated to this round's own change: `ReportCard.tsx`'s `buildStepRows()` was typed to take `ExplorationResult | undefined` while the real `PipelineResult.exploration` field is `ExplorationResult | null` (a real mismatch already tolerated only because `?.`-optional-chaining happened to handle `null` fine at runtime); and two test files' `constructor(public url: string)` TypeScript parameter-property shorthand, which isn't allowed under the project's `erasableSyntaxOnly` compiler option since it requires actual code generation, not pure type erasure. Confirmed these were pre-existing (not introduced by this round) by running the same build against the unmodified base branch first.
+
+**What was generated (the build fix):**
+- `ReportCard.tsx` - `buildStepRows()`'s `exploration` parameter widened to `ExplorationResult | null | undefined`, matching the real type it's actually called with.
+- `GlobalChat.test.tsx` and `PipelineRunContext.test.tsx` - `FakeWebSocket`'s constructor rewritten as an explicit `url: string` field + plain assignment in the constructor body, instead of the shorthand `constructor(public url: string)`.
+
+**What was checked before accepting:**
+- Grepped the whole frontend for any other `constructor(public|private|protected|readonly ...)` shorthand - none found, so no other file was silently carrying the same latent build failure.
+- `npm run build` (the actual Vercel/Netlify build command) now succeeds end to end; inspected the built `dist/assets/*.js` output directly and confirmed a test `VITE_API_BASE_URL` value passed at build time was genuinely baked into the bundle, not just accepted without effect.
+- Full frontend suite (49 tests), `tsc --noEmit`, and `oxlint` all still pass after the type/syntax fixes - confirmed these were pure type-level/syntax corrections with no behavior change.
