@@ -70,9 +70,14 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="ProTester", lifespan=_lifespan)
 
+# Comma-separated real origins (e.g. a deployed Vercel/Netlify frontend
+# URL) can be added via ALLOWED_ORIGINS without touching this file -
+# localhost:5173 stays allowed by default so local dev keeps working
+# unchanged whether or not the env var is set.
+_extra_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", *_extra_origins],
     allow_methods=["*"],
     allow_headers=["*"],
 )
