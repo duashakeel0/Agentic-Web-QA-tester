@@ -994,3 +994,13 @@ Follow-up ask, in the user's words: "shldnt it work like we use our trello usern
 **What was generated:** both changed to `protester-report-...pdf`.
 
 **What was checked before accepting:** grepped both `backend/` and `frontend/` for any remaining `sentinelqa` (case-insensitive) - zero hits; confirmed no test asserts the old filename string, so nothing else needed updating.
+
+---
+
+## Netlify SPA routing (switched from Vercel after the fact)
+
+**Context:** decided to deploy the frontend to Netlify instead of Vercel (already familiar with it from a previous project) - `vercel.json`'s rewrite rule only applies on Vercel, so Netlify needed its own equivalent to avoid the same deep-link-404-on-refresh problem for this client-side-routed (react-router) app.
+
+**What was generated:** `frontend/public/_redirects` (new) - `/* /index.html 200`, Netlify's own SPA-fallback config format. `public/` contents are copied verbatim into `dist/` by Vite at build time, which is where Netlify looks for it.
+
+**What was checked before accepting:** ran the real `npm run build` and confirmed `dist/_redirects` came out with the exact expected content, not just that the source file existed.
