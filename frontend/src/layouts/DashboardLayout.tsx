@@ -84,7 +84,7 @@ function DashboardLayout({ children }: { children: ReactNode }) {
             <ShieldCheck size={20} strokeWidth={2.25} />
           </span>
           <div className="sidebar-brand-copy">
-            <div className="brand-name">SentinelQA</div>
+            <div className="brand-name">ProTester</div>
             <div className="brand-tagline">AI QA Agent</div>
           </div>
         </div>

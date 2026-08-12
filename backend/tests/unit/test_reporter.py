@@ -260,7 +260,7 @@ async def test_render_summary_mixed_pass_fail(reporter):
 
     text = reporter._render_summary(Report(ticket_id="T1", findings=[finding]), [pass_run, fail_run])
 
-    assert text.startswith("Result: FAIL")
+    assert text.startswith("Result: ISSUE FOUND")
     assert "1 passed, 0 passed with issues, 1 failed out of 2 workflow(s)" in text
     assert "[PASS] practice_software_testing/checkout" in text
     assert "Failure reason: Login form rejects valid credentials." in text

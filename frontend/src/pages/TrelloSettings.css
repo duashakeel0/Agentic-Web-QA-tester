@@ -103,6 +103,47 @@
   margin: 0.9rem 0 0;
 }
 
+.ts-connect {
+  align-self: flex-start;
+  padding: 0.6rem 1.2rem;
+  border-radius: 10px;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  color: var(--accent);
+  font: inherit;
+  font-weight: 600;
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.ts-connect:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ts-connect-hint {
+  font-size: 12px;
+  color: var(--text);
+  margin: -0.6rem 0 0;
+}
+
+.ts-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0.2rem 0;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.ts-divider::before,
+.ts-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
 .ts-submit {
   align-self: flex-start;
   padding: 0.6rem 1.2rem;

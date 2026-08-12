@@ -13,6 +13,7 @@ import {
 import { apiGet, ApiError } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import type { HistoryEntry } from "../types/history";
+import { verdictLabel } from "../utils/verdict";
 import "./History.css";
 
 const PAGE_SIZE = 15;
@@ -210,7 +211,7 @@ function History() {
                   <td>
                     {entry.matched ? (
                       <span className={`history-status history-status-${entry.verdict}`}>
-                        {entry.verdict?.replace(/_/g, " ").toUpperCase()}
+                        {verdictLabel(entry.verdict)}
                       </span>
                     ) : (
                       <span className="history-status history-status-unmatched">NO MATCH</span>

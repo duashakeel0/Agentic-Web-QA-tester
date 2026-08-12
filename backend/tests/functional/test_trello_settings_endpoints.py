@@ -44,8 +44,11 @@ def test_save_trello_credentials_rejects_empty_fields(client, auth_headers, tmp_
     assert response.status_code == 400
 
 
-def test_save_trello_credentials_then_status_reports_connected_via_settings(client, auth_headers, tmp_path, monkeypatch):
+def test_save_trello_credentials_then_status_reports_connected_via_settings(
+    client, auth_headers, tmp_path, monkeypatch, httpx_mock
+):
     _isolate(tmp_path, monkeypatch)
+    httpx_mock.add_response(json={"id": "member-1"})
 
     save_response = client.post(
         "/api/trello/settings", json={"api_key": "real-key", "token": "real-token"}, headers=auth_headers
@@ -57,11 +60,33 @@ def test_save_trello_credentials_then_status_reports_connected_via_settings(clie
     assert status_response.json() == {"connected": True, "source": "settings"}
 
 
-def test_save_trello_credentials_response_never_echoes_the_secret_back(client, auth_headers, tmp_path, monkeypatch):
+def test_save_trello_credentials_rejects_credentials_trello_itself_rejects(
+    client, auth_headers, tmp_path, monkeypatch, httpx_mock
+):
+    # Nothing gets saved at all when Trello's own API says these
+    # credentials don't work - a typo or a placeholder value must never
+    # be accepted and shown as "connected".
+    _isolate(tmp_path, monkeypatch)
+    httpx_mock.add_response(status_code=401)
+
+    save_response = client.post(
+        "/api/trello/settings", json={"api_key": "admin", "token": "admin123"}, headers=auth_headers
+    )
+    status_response = client.get("/api/trello/status", headers=auth_headers)
+
+    assert save_response.status_code == 400
+    assert "rejected" in save_response.json()["detail"]
+    assert status_response.json() == {"connected": False, "source": "none"}
+
+
+def test_save_trello_credentials_response_never_echoes_the_secret_back(
+    client, auth_headers, tmp_path, monkeypatch, httpx_mock
+):
     # The whole point of not returning the key/token in the response body
     # is that a saved secret should never round-trip back down to the
     # browser/network tab after being submitted.
     _isolate(tmp_path, monkeypatch)
+    httpx_mock.add_response(json={"id": "member-1"})
 
     response = client.post(
         "/api/trello/settings", json={"api_key": "super-secret-key", "token": "super-secret-token"},
@@ -77,8 +102,9 @@ def test_disconnect_trello_requires_auth(client):
     assert response.status_code == 401
 
 
-def test_disconnect_trello_clears_the_connection(client, auth_headers, tmp_path, monkeypatch):
+def test_disconnect_trello_clears_the_connection(client, auth_headers, tmp_path, monkeypatch, httpx_mock):
     _isolate(tmp_path, monkeypatch)
+    httpx_mock.add_response(json={"id": "member-1"})
     client.post("/api/trello/settings", json={"api_key": "k", "token": "t"}, headers=auth_headers)
 
     disconnect_response = client.delete("/api/trello/settings", headers=auth_headers)
@@ -88,10 +114,13 @@ def test_disconnect_trello_clears_the_connection(client, auth_headers, tmp_path,
     assert status_response.json() == {"connected": False, "source": "none"}
 
 
-def test_settings_source_takes_precedence_over_env_when_both_are_present(client, auth_headers, tmp_path, monkeypatch):
+def test_settings_source_takes_precedence_over_env_when_both_are_present(
+    client, auth_headers, tmp_path, monkeypatch, httpx_mock
+):
     _isolate(tmp_path, monkeypatch)
     monkeypatch.setenv("TRELLO_API_KEY", "env-key")
     monkeypatch.setenv("TRELLO_TOKEN", "env-token")
+    httpx_mock.add_response(json={"id": "member-1"})
     client.post("/api/trello/settings", json={"api_key": "settings-key", "token": "settings-token"}, headers=auth_headers)
 
     response = client.get("/api/trello/status", headers=auth_headers)
@@ -99,7 +128,9 @@ def test_settings_source_takes_precedence_over_env_when_both_are_present(client,
     assert response.json() == {"connected": True, "source": "settings"}
 
 
-def test_disconnect_falls_back_to_env_source_if_env_vars_are_still_set(client, auth_headers, tmp_path, monkeypatch):
+def test_disconnect_falls_back_to_env_source_if_env_vars_are_still_set(
+    client, auth_headers, tmp_path, monkeypatch, httpx_mock
+):
     # Disconnecting removes the dashboard-saved connection specifically -
     # if TRELLO_API_KEY/TRELLO_TOKEN are still set as env vars underneath
     # it, the app falls back to those, same as if the dashboard had never
@@ -107,6 +138,7 @@ def test_disconnect_falls_back_to_env_source_if_env_vars_are_still_set(client, a
     _isolate(tmp_path, monkeypatch)
     monkeypatch.setenv("TRELLO_API_KEY", "env-key")
     monkeypatch.setenv("TRELLO_TOKEN", "env-token")
+    httpx_mock.add_response(json={"id": "member-1"})
     client.post("/api/trello/settings", json={"api_key": "settings-key", "token": "settings-token"}, headers=auth_headers)
 
     response = client.delete("/api/trello/settings", headers=auth_headers)

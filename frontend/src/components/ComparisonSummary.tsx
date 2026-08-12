@@ -1,6 +1,7 @@
 import BarList from "./charts/BarList";
 import { API_BASE_URL } from "../config";
 import type { ComparisonReport, PipelineResult } from "../types/pipeline";
+import { verdictLabel } from "../utils/verdict";
 import "./ComparisonSummary.css";
 
 /** The last screenshot captured for a run - a same-point-in-time "final
@@ -52,8 +53,8 @@ function ComparisonSummary({
   const rows: { label: string; claude: string; ollama: string; winner?: "claude" | "ollama" }[] = [
     {
       label: "Verdict",
-      claude: comparison.claude_verdict?.replace(/_/g, " ").toUpperCase() ?? "n/a",
-      ollama: comparison.ollama_verdict?.replace(/_/g, " ").toUpperCase() ?? "n/a",
+      claude: verdictLabel(comparison.claude_verdict),
+      ollama: verdictLabel(comparison.ollama_verdict),
     },
     {
       label: "Time taken",

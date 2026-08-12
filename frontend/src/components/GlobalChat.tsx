@@ -90,7 +90,7 @@ function GlobalChat() {
           <div className="global-chat-messages">
             {messages.length === 0 && (
               <p className="global-chat-empty">
-                Ask how SentinelQA works, a new workflow idea, or say "run ticket ABC123" to start a test.
+                Ask how ProTester works, a new workflow idea, or say "run ticket ABC123" to start a test.
               </p>
             )}
             {messages.map((m, i) => (

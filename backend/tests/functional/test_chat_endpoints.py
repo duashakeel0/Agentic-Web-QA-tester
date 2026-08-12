@@ -2,7 +2,7 @@ from unittest.mock import AsyncMock
 
 import app.main as main_module
 from app.agents.llm_client import LLMError, LLMResponse
-from app.agents.schema import PipelineResult, TestPlan
+from app.agents.schema import Finding, PipelineResult, Report, TestPlan, VerifierResult
 
 
 class _FakeLLMClient:
@@ -169,3 +169,50 @@ async def test_ask_about_report_returns_grounded_answer(client, auth_headers, ap
 
     assert response.status_code == 200
     assert response.json()["answer"] == "It failed because of a timeout."
+
+
+async def test_chat_prompt_is_grounded_in_the_most_recent_run_s_real_failure_reason(client, auth_headers, app_history, monkeypatch):
+    # Reproduces the real complaint: asking the "Ask anything" chat "why
+    # did llama fail" got "I don't have the actual report contents in
+    # front of me right now" - true at the time, since the chat prompt
+    # never included any real run data at all. This confirms the fix:
+    # the actual finding/error text from the most recent run now reaches
+    # the model, so it has something real to answer from instead of
+    # declining or inventing a reason.
+    result = PipelineResult(
+        ticket_id="QnhoyKRV", provider="ollama",
+        plan=TestPlan(ticket_id="QnhoyKRV", matched=True, domain="parabank", workflow="transfer_funds", steps=["a"]),
+        verification=VerifierResult(
+            ticket_id="QnhoyKRV", domain="parabank", workflow="transfer_funds", verdict="fail",
+            assertion_checked={}, initial_check_passed=False, retried=True,
+            explanation="The transfer funds workflow is completely broken and cannot be completed due to an infinite loop.",
+        ),
+        report=Report(
+            ticket_id="QnhoyKRV",
+            findings=[
+                Finding(
+                    ticket_id="QnhoyKRV", domain="parabank", workflow="transfer_funds", severity="high",
+                    summary="Failed step: Explorer repeated the same action 3 times on step 'Open the Transfer "
+                    "Funds page from Account Services' - stopping to avoid a loop.",
+                    error_message="Explorer repeated the same action 3 times on step 'Open the Transfer Funds "
+                    "page from Account Services' (click on \"a[text='Transfer Funds']\") - stopping to avoid a loop.",
+                    reproduction_steps=[],
+                )
+            ],
+        ),
+        started_at=0.0, finished_at=104.1, total_duration_ms=104100.0,
+    )
+    await app_history.record_run(result)
+    captured_client = _FakeLLMClient(text='{"intent": "chat", "reply": "ok"}')
+    captured_client.complete = AsyncMock(wraps=captured_client.complete)
+    monkeypatch.setattr(main_module, "ClaudeLLMClient", lambda: captured_client)
+
+    client.post(
+        "/api/chat", json={"message": "its done, now check what the reason llama failed", "history": []},
+        headers=auth_headers,
+    )
+
+    prompt = captured_client.complete.call_args.args[0]
+    assert "QnhoyKRV" in prompt
+    assert "stopping to avoid a loop" in prompt
+    assert "infinite loop" in prompt  # the Verifier's own explanation, not just the finding

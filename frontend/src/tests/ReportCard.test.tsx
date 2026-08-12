@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import ReportCard from "../components/ReportCard";
@@ -69,10 +69,14 @@ describe("ReportCard", () => {
     expect(screen.getByText(/expected outcome was verified/)).toBeInTheDocument();
   });
 
-  it("shows a FAIL badge with failure reason and error message", () => {
+  it("shows an ISSUE FOUND badge (not FAIL) with failure reason and error message", () => {
+    // "FAIL" reads as if the AI agent itself failed to do its job - by
+    // this point it ran the workflow correctly and found a real defect
+    // on the site under test, so the badge says so instead.
     render(<ReportCard result={failingResult()} />);
 
-    expect(screen.getByText("FAIL")).toBeInTheDocument();
+    expect(screen.getByText("ISSUE FOUND")).toBeInTheDocument();
+    expect(screen.queryByText("FAIL")).not.toBeInTheDocument();
     expect(screen.getByText(/Login button does not respond/)).toBeInTheDocument();
     expect(screen.getByText(/Timed out waiting for '#login-button'/)).toBeInTheDocument();
   });
@@ -133,10 +137,44 @@ describe("ReportCard", () => {
 
     render(<ReportCard result={result} />);
 
-    const failStatuses = screen.getAllByText("FAIL");
-    // The header badge and the step-table status cell both say "FAIL".
-    expect(failStatuses.length).toBeGreaterThanOrEqual(2);
+    // The header badge reads "ISSUE FOUND" (a finding about the site),
+    // while the step-table status cell for the specific action that
+    // failed still reads "FAIL" (an execution-level outcome) - the two
+    // are deliberately different labels for different things.
+    expect(screen.getByText("ISSUE FOUND")).toBeInTheDocument();
+    expect(screen.getAllByText("FAIL").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("Timed out")).toBeInTheDocument();
+  });
+
+  it("shows FAIL on the last real step when every action succeeded but the workflow's overall verdict is fail", () => {
+    // Reproduces a real practice_software_testing login report: every
+    // action (fill email, fill password, click login) genuinely
+    // succeeded with no error, yet the site never actually authenticated
+    // - the FAIL badge next to an all-PASS step table read as a
+    // contradiction. Only the last real action (the one the final
+    // assertion depends on) should read FAIL; the earlier steps that
+    // genuinely achieved their own local goal stay PASS.
+    const result = failingResult();
+    result.plan = basePlan({ steps: ["Enter the email", "Enter the password", "Click the Login button"] });
+    result.exploration = {
+      ...result.exploration!,
+      completed: true,
+      actions: [
+        { step: "Enter the email", action: "fill", selector: "#email", value: "customer@example.com", reasoning: null, success: true, error: null, is_broken_input_attempt: false, screenshot_path: null },
+        { step: "Enter the password", action: "fill", selector: "#password", value: "welcome01", reasoning: null, success: true, error: null, is_broken_input_attempt: false, screenshot_path: null },
+        { step: "Click the Login button", action: "click", selector: "input[type='submit']", value: null, reasoning: null, success: true, error: null, is_broken_input_attempt: false, screenshot_path: null },
+      ],
+    };
+
+    render(<ReportCard result={result} />);
+
+    const emailRow = screen.getByText("Enter the email").closest("tr")!;
+    const passwordRow = screen.getByText("Enter the password").closest("tr")!;
+    const loginRow = screen.getByText("Click the Login button").closest("tr")!;
+    expect(within(emailRow).getByText("PASS")).toBeInTheDocument();
+    expect(within(passwordRow).getByText("PASS")).toBeInTheDocument();
+    expect(within(loginRow).getByText("FAIL")).toBeInTheDocument();
+    expect(within(loginRow).getByText(/did not achieve the expected outcome/)).toBeInTheDocument();
   });
 
   it("shows PASS for a step that succeeded before a later, unrelated hiccup", () => {

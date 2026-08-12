@@ -39,6 +39,17 @@ _GRID = colors.HexColor("#cccccc")
 _VERDICT_COLORS = {"pass": _PASS_COLOR, "pass_with_issues": _WARN_COLOR, "fail": _FAIL_COLOR}
 _STEP_STATUS_COLORS = {"PASS": _PASS_COLOR, "FAIL": _FAIL_COLOR, "SKIPPED": _SKIP_COLOR, "NOT REACHED": _SKIP_COLOR}
 
+
+def _verdict_label(verdict: str) -> str:
+    """"ISSUE FOUND" rather than "FAIL" - by the time a run reaches this
+    verdict, the agent has run the workflow correctly and found a real
+    defect on the site under test, not failed to do its own job. Every
+    other verdict displays as its own plain, underscore-free uppercase
+    text, same as before."""
+    if verdict == "fail":
+        return "ISSUE FOUND"
+    return verdict.replace("_", " ").upper()
+
 # Screenshots are served from main.py's /screenshots static mount, but the
 # PDF needs the real file on disk - this is that mount's target directory,
 # kept in sync with main.py's SCREENSHOTS_DIR by convention (both point at
@@ -83,7 +94,7 @@ def _format_expected_outcome(expected: dict | None) -> str:
     return " AND ".join(parts) if parts else "n/a"
 
 
-def _step_rows(plan: dict, exploration: dict | None) -> list[dict]:
+def _step_rows(plan: dict, exploration: dict | None, verdict: str | None = None) -> list[dict]:
     """One row per planned test step, derived entirely from the real action
     log rather than fabricated - a step with no actions at all is either
     "skipped" (already satisfied when the page loaded, only possible for a
@@ -91,6 +102,19 @@ def _step_rows(plan: dict, exploration: dict | None) -> list[dict]:
     steps = plan.get("steps") or []
     actions = (exploration or {}).get("actions") or []
     completed = bool((exploration or {}).get("completed"))
+    real_actions = [a for a in actions if not a.get("is_broken_input_attempt")]
+    # When the workflow ran to completion (every step's action executed
+    # with no error) but the overall verdict is still "fail", the
+    # expected outcome was never actually reached - a real ParaBank/
+    # Toolshop-style login case: the click succeeds mechanically, but the
+    # site never authenticates. Every earlier step genuinely achieved its
+    # own local goal (a field got filled); it's specifically the last
+    # real action taken - the one the final assertion actually depends
+    # on - whose "PASS" is misleading next to an overall FAIL badge.
+    # Marked here, not just left to the Findings section, since a step
+    # table that shows a clean sweep right above a FAIL verdict reads as
+    # a contradiction rather than "the click worked, the login didn't."
+    failed_step = real_actions[-1]["step"] if (completed and verdict == "fail" and real_actions) else None
 
     rows = []
     for step in steps:
@@ -100,6 +124,9 @@ def _step_rows(plan: dict, exploration: dict | None) -> list[dict]:
                 status, note = "SKIPPED", "Already satisfied when the page loaded - no action needed."
             else:
                 status, note = "NOT REACHED", "Exploration stopped before this step was attempted."
+        elif step == failed_step:
+            status = "FAIL"
+            note = "The action completed, but did not achieve the expected outcome - see Findings below."
         else:
             # A step's real outcome is whether it was ever actually
             # achieved, not whether its literal last logged attempt
@@ -221,7 +248,7 @@ def build_pdf(entry: HistoryDetail, narrative: dict) -> bytes:
     verdict_color = _VERDICT_COLORS.get(verdict, _FAIL_COLOR)
 
     story = [
-        Paragraph("SentinelQA — QA Test Execution Report", h1),
+        Paragraph("ProTester — QA Test Execution Report", h1),
         Paragraph("Automated Functional Test, executed by an AI QA agent", subtitle),
         Paragraph(f"Report generated {_fmt_ts(time.time())}", styles["Normal"]),
         Spacer(1, 12),
@@ -238,7 +265,7 @@ def build_pdf(entry: HistoryDetail, narrative: dict) -> bytes:
         ["Test executed", f"{_fmt_ts(entry.started_at)} — {_fmt_ts(entry.finished_at)}"],
         ["Total duration", f"{entry.total_duration_ms / 1000:.1f}s"],
         ["Estimated cost", f"${entry.estimated_cost_usd:.4f}"],
-        ["Overall result", verdict.replace("_", " ").upper()],
+        ["Overall result", _verdict_label(verdict)],
     ]
     info_table = Table(info_rows, colWidths=[160, 310])
     info_table.setStyle(
@@ -258,7 +285,7 @@ def build_pdf(entry: HistoryDetail, narrative: dict) -> bytes:
 
     # ---- Test execution summary -------------------------------------------
     story.append(Paragraph("2. Test Execution Summary", h2))
-    step_rows = _step_rows(plan, exploration)
+    step_rows = _step_rows(plan, exploration, verdict)
     steps_passed = sum(1 for r in step_rows if r["status"] == "PASS")
     steps_failed = sum(1 for r in step_rows if r["status"] == "FAIL")
     actions_attempted = int(metrics.get("actions_attempted", 0))
@@ -301,7 +328,7 @@ def build_pdf(entry: HistoryDetail, narrative: dict) -> bytes:
     outcome_rows = [
         ["Expected", Paragraph(_format_expected_outcome(plan.get("expected_outcome")), body)],
         ["Actual", Paragraph(actual_text, body)],
-        ["Result", verdict.replace("_", " ").upper()],
+        ["Result", _verdict_label(verdict)],
     ]
     outcome_table = Table(outcome_rows, colWidths=[80, 390])
     outcome_table.setStyle(

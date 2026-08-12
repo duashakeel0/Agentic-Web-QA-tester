@@ -41,7 +41,7 @@ function LoginPage() {
             <ShieldCheck size={22} aria-hidden="true" />
           </span>
           <div>
-            <div className="login-brand-name">SentinelQA</div>
+            <div className="login-brand-name">ProTester</div>
             <div className="login-brand-tagline">AI QA Agent</div>
           </div>
         </div>

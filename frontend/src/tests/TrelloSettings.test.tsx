@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import TrelloSettings from "../pages/TrelloSettings";
 
 const { apiGetMock, apiPostMock, apiDeleteMock } = vi.hoisted(() => ({
@@ -21,6 +21,14 @@ vi.mock("../services/api", () => ({
     }
   },
 }));
+
+const PENDING_KEY_STORAGE = "trello_connect_pending_api_key";
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  sessionStorage.clear();
+  window.history.replaceState(null, "", "/trello-settings");
+});
 
 describe("TrelloSettings", () => {
   it("shows Not connected when nothing is configured", async () => {
@@ -99,5 +107,71 @@ describe("TrelloSettings", () => {
 
     await waitFor(() => expect(apiDeleteMock).toHaveBeenCalledWith("/api/trello/settings"));
     expect(await screen.findByText("Not connected")).toBeInTheDocument();
+  });
+
+  it("shows an inline error and does not navigate if Connect with Trello is clicked with no API key", async () => {
+    apiGetMock.mockResolvedValue({ connected: false, source: "none" });
+    const user = userEvent.setup();
+
+    render(<TrelloSettings />);
+    await screen.findByText("Not connected");
+
+    await user.click(screen.getByText("Connect with Trello"));
+
+    expect(screen.getByText("Enter your API key first, then click Connect with Trello.")).toBeInTheDocument();
+    expect(sessionStorage.getItem(PENDING_KEY_STORAGE)).toBeNull();
+  });
+
+  it("stashes the API key and sends the browser to Trello's real authorize page", async () => {
+    apiGetMock.mockResolvedValue({ connected: false, source: "none" });
+    const user = userEvent.setup();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", { writable: true, value: { ...originalLocation, href: "" } });
+
+    render(<TrelloSettings />);
+    await screen.findByText("Not connected");
+
+    await user.type(screen.getByPlaceholderText("Your Trello API key"), "my-real-key");
+    await user.click(screen.getByText("Connect with Trello"));
+
+    expect(sessionStorage.getItem(PENDING_KEY_STORAGE)).toBe("my-real-key");
+    expect(window.location.href).toContain("https://trello.com/1/authorize");
+    expect(window.location.href).toContain("key=my-real-key");
+    expect(window.location.href).toContain("response_type=token");
+
+    Object.defineProperty(window, "location", { writable: true, value: originalLocation });
+  });
+
+  it("auto-saves the token Trello approved when returning with a stashed API key", async () => {
+    sessionStorage.setItem(PENDING_KEY_STORAGE, "stashed-key");
+    window.history.replaceState(null, "", "/trello-settings#token=granted-token");
+    apiGetMock
+      .mockResolvedValueOnce({ connected: false, source: "none" })
+      .mockResolvedValueOnce({ connected: true, source: "settings" });
+    apiPostMock.mockResolvedValue({ connected: true, source: "settings" });
+
+    render(<TrelloSettings />);
+
+    await waitFor(() =>
+      expect(apiPostMock).toHaveBeenCalledWith("/api/trello/settings", {
+        api_key: "stashed-key",
+        token: "granted-token",
+      }),
+    );
+    expect(await screen.findByText(/Trello connected/)).toBeInTheDocument();
+    expect(sessionStorage.getItem(PENDING_KEY_STORAGE)).toBeNull();
+    expect(window.location.hash).toBe("");
+  });
+
+  it("shows an error instead of saving if the API key was lost across the redirect", async () => {
+    window.history.replaceState(null, "", "/trello-settings#token=granted-token");
+    apiGetMock.mockResolvedValue({ connected: false, source: "none" });
+
+    render(<TrelloSettings />);
+
+    expect(
+      await screen.findByText(/the API key used to start it was lost/),
+    ).toBeInTheDocument();
+    expect(apiPostMock).not.toHaveBeenCalled();
   });
 });

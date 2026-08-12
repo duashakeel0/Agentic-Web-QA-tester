@@ -31,7 +31,7 @@ from pydantic import BaseModel
 
 from app.agents.claude_client import ClaudeLLMClient
 from app.agents.llm_client import LLMError
-from app.agents.pipeline import run_both, run_pipeline
+from app.agents.pipeline import make_llm, run_both, run_pipeline
 from app.auth import AuthError, login as auth_login, logout as auth_logout, require_auth, require_auth_ws
 from app.browser import BrowserSession
 from app.domains.manifest import load_domains, save_workflow, slugify
@@ -46,6 +46,7 @@ from app.history.schema import (
     SiteStats,
 )
 from app.history.store import HistoryStore
+from app.mcp_server.trello_client import TrelloError, verify_trello_credentials
 from app.pdf_report import generate_report_pdf
 from app.scheduler import SmokeScheduler, list_smoke_workflows
 from app.trello_settings import clear_trello_settings, load_trello_settings, save_trello_settings
@@ -67,11 +68,16 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
     smoke_scheduler.shutdown()
 
 
-app = FastAPI(title="SentinelQA", lifespan=_lifespan)
+app = FastAPI(title="ProTester", lifespan=_lifespan)
 
+# Comma-separated real origins (e.g. a deployed Vercel/Netlify frontend
+# URL) can be added via ALLOWED_ORIGINS without touching this file -
+# localhost:5173 stays allowed by default so local dev keeps working
+# unchanged whether or not the env var is set.
+_extra_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", *_extra_origins],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -207,6 +213,15 @@ async def run_pipeline_ws(websocket: WebSocket, token: str = Depends(require_aut
                 {"type": "error", "message": f"Unknown model {model!r} - expected claude, ollama, or both."}
             )
             return
+        if not _trello_status().connected:
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": "Trello isn't connected yet - every ticket run reads its details from Trello, "
+                    "so connect it from Trello Settings first.",
+                }
+            )
+            return
 
         async def on_event(event: dict) -> None:
             await websocket.send_json(event)
@@ -331,7 +346,7 @@ async def get_history_report_pdf(run_id: int, _token: str = Depends(require_auth
         raise HTTPException(status_code=404, detail="Run not found.")
 
     pdf_bytes = await generate_report_pdf(entry)
-    filename = f"sentinelqa-report-{entry.ticket_id}-{run_id}.pdf"
+    filename = f"protester-report-{entry.ticket_id}-{run_id}.pdf"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -468,11 +483,18 @@ async def save_trello_credentials(body: TrelloSettingsIn, _token: str = Depends(
     requiring a backend .env file - the gap a hosted, non-technical user
     would otherwise hit with no filesystem access. One shared connection
     at a time (this app has one login, not per-user accounts) - saving a
-    new one replaces whatever was previously connected."""
+    new one replaces whatever was previously connected. Verified against
+    Trello's real API before being saved - a typo or a placeholder value
+    would otherwise silently "connect" until the first real ticket run
+    failed on it."""
     api_key = body.api_key.strip()
     token = body.token.strip()
     if not api_key or not token:
         raise HTTPException(status_code=400, detail="Both an API key and a token are required.")
+    try:
+        await verify_trello_credentials(api_key, token)
+    except TrelloError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     save_trello_settings(api_key, token)
     return _trello_status()
 
@@ -592,7 +614,7 @@ def _system_facts_for_chat() -> str:
     time) instead of generic AI filler about QA tools in general."""
     domains = load_domains()
     domain_lines = "\n".join(f"- {d.name} ({d.base_url}): {', '.join(w.name for w in d.workflows)}" for d in domains)
-    return f"""SentinelQA is a four-agent AI QA testing pipeline:
+    return f"""ProTester is a four-agent AI QA testing pipeline:
 - Planner: reads a Trello ticket, matches it against the registered domain/workflow manifest below, builds a test plan.
 - Explorer: drives a real Playwright browser, deciding each next action from the live page state (not a fixed script).
 - Verifier: re-checks a flagged result once before it's accepted as confirmed.
@@ -612,6 +634,44 @@ be tested until it's added via the Domain Knowledge page):
 """
 
 
+CHAT_RECENT_RUNS_LIMIT = 5
+
+
+async def _recent_runs_context() -> str:
+    """Real facts (verdict, the Verifier's explanation, and every
+    finding's real summary/error) about the most recent runs - without
+    this, "why did that fail" has nothing grounded to answer from and
+    either declines or has to invent a reason, the same "never guess"
+    problem every other agent in this system already avoids by only
+    ever reporting what it actually observed."""
+    entries = await history.list_runs(limit=CHAT_RECENT_RUNS_LIMIT)
+    if not entries:
+        return "No test runs have been recorded yet."
+
+    lines = []
+    for entry in entries:
+        detail = await history.get_run(entry.id)
+        if detail is None:
+            continue
+        result = detail.result
+        verification = result.get("verification") or {}
+        findings = ((result.get("report") or {}).get("findings")) or []
+        finding_text = "; ".join(
+            f"[{f.get('severity')}] {f.get('summary')}" + (f" (error: {f.get('error_message')})" if f.get("error_message") else "")
+            for f in findings
+        )
+        line = (
+            f"- Run #{entry.id}, ticket {entry.ticket_id} ({entry.domain or '?'}/{entry.workflow or '?'} "
+            f"on {entry.provider}): verdict {entry.verdict or 'n/a'}."
+        )
+        if verification.get("explanation"):
+            line += f" Verifier said: {verification['explanation']!r}."
+        if finding_text:
+            line += f" Findings: {finding_text}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(body: ChatRequest, _token: str = Depends(require_auth)) -> ChatResponse:
     """A general-purpose assistant, unlike /ask which only answers from one
@@ -625,11 +685,19 @@ async def chat(body: ChatRequest, _token: str = Depends(require_auth)) -> ChatRe
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     transcript = "\n".join(f"{m.role.capitalize()}: {m.content}" for m in body.history[-CHAT_HISTORY_LIMIT:])
-    prompt = f"""You are the assistant built into SentinelQA, an AI-powered QA testing dashboard. You can
+    prompt = f"""You are the assistant built into ProTester, an AI-powered QA testing dashboard. You can
 help with anything the user asks, not only QA/testing topics, AND you can answer accurately about how
 this exact system works using the real facts below - never invent architecture details not listed here.
 
 {_system_facts_for_chat()}
+
+Most recent test runs, newest first - use this to answer "why did that fail / pass" questions with the
+REAL reason, grounded in what actually happened (the Verifier's explanation and the Reporter's findings
+below), not a generic non-answer. If the user's question is clearly about their most recent run, assume
+they mean the run listed first. Give a direct, short answer (one or two sentences is fine) instead of
+saying you don't have the report in front of you when it's right here. Only say you don't know if
+nothing below actually covers what's asked:
+{await _recent_runs_context()}
 
 You can also START a real test run when the user clearly asks to run/test a ticket in plain language
 (e.g. "run ticket ABC123", "test the toolshop login on both models"), as long as they give or clearly

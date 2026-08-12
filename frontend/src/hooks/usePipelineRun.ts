@@ -222,5 +222,8 @@ export function usePipelineRun() {
     [pushFeedMessage],
   );
 
-  return { status, feed, stages, frames, frameHistory, results, historyIds, comparison, errorMessage, start, reset, AGENTS };
+  return {
+    status, feed, stages, frames, frameHistory, results, historyIds, comparison,
+    errorMessage, start, reset, AGENTS,
+  };
 }

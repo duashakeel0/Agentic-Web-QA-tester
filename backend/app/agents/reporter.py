@@ -217,7 +217,10 @@ Respond with ONLY a JSON object, no other text, in exactly this shape:
         passed_with_issues = [r for r in runs if r.verification.verdict == "pass_with_issues"]
         failed = [r for r in runs if r.verification.verdict == "fail"]
 
-        overall = "FAIL" if failed else ("PASS WITH ISSUES" if passed_with_issues else "PASS")
+        # "ISSUE FOUND" rather than "FAIL" - by this point the agent has
+        # run the workflow correctly and found a real defect on the site
+        # under test, not failed to do its own job.
+        overall = "ISSUE FOUND" if failed else ("PASS WITH ISSUES" if passed_with_issues else "PASS")
         lines = [
             f"Result: {overall}",
             f"Testing summary: {len(passed)} passed, {len(passed_with_issues)} passed with issues, "

@@ -747,3 +747,260 @@ Running log of significant AI prompts used to build this project, per the intern
 - `frontend/src/tests/TrelloSettings.test.tsx` (new, 6 tests) - not-connected/settings/env status states render correctly, Disconnect only appears for the settings source, empty-field submission is rejected client-side without an API call, save and disconnect both trigger a real reload of status afterward.
 - Full backend suite (279 tests, +18) and frontend suite (47 tests, +6) pass; `tsc --noEmit` and `oxlint` clean.
 - **Not yet completed, and explicitly flagged to the mentor already:** this is one shared connection, not per-user (the app has a single shared login, not real user accounts, so there's no way to have two people's Trello boards connected at once); disconnecting deletes the local file but doesn't revoke the token on Trello's own side (only the user's own Trello account settings can do that); still requires manually generating a key/token from Trello's site rather than a one-click OAuth "Sign in with Trello" flow. All three are documented, agreed-on tradeoffs for this scope, not oversights.
+
+---
+
+## Day 10 - Ask-the-Site Search Bar & On-Demand Queries
+
+**Context:** The ticket's own framing: a search bar that answers plain-English questions about a known domain at any time - before, during, or after a run - by reusing the Explorer in an on-demand mode "rather than introducing a separate agent," and an unrecognized-domain query must decline the same way a test run does, never guess.
+
+**Prompt:** "ig its alr done" (Day 9), then the Day 10 ticket pasted with "1. Add epic / 2. KAN-16" Jira metadata and `Branch: feature/search-bar`. Confirmed the branch choice with the user the same way as Day 9's (new branch matching the ticket's own field, off the current work).
+
+**What was found:** the codebase already had half of the "richer context" answer path in a different shape - `/api/history/{run_id}/ask` answers a question about one *finished, saved* run from its stored report. Day 10 needed something broader: a domain-scoped question independent of any specific run, with a *live* browsing fallback when there's no relevant run to answer from - which is what actually justifies "reuses the Explorer" instead of just another LLM-over-stored-data endpoint like the existing one.
+
+**What was generated:**
+- `backend/app/agents/schema.py` - `AskContext` (whatever richer context a caller already has: domain, final_url/final_page_text, actions) and `AskResult` (question, matched, domain/reason, answer, source, final_url, actions).
+- `backend/app/agents/explorer.py` - `ExplorerAgent.ask(question, existing_context=None, close_browser=True)`, entirely on the existing agent, no new agent class:
+  - `_match_domain_for_question()` - the same "decide which registered domain this concerns, or say it doesn't match - never guess" prompt shape as the Planner's own `_match_domain`, adapted from a ticket to a free-form question. A hallucinated domain name outside the real manifest is treated as unmatched, same principle as the Planner already applies.
+  - `_answer_from_context()` - answers directly from an `AskContext` with one LLM call, no browser - the "during/after a run" fast path.
+  - `_ask_live()` - a new, small bounded loop (`ASK_MAX_ACTIONS = 4`, on purpose much smaller than a workflow step's budget - a question should only ever need a couple of clicks, not a multi-step workflow) reusing `_snapshot`/`_resolve_selector`/`_execute_action`/`_emit_action`/`_live_frame_loop` - the same real browsing machinery `explore()` uses - with a new `_ask_prompt()` that lets the model either take one more browsing action or answer now. Falls back to `_answer_from_context()` on whatever was actually observed if the budget runs out without a direct answer, rather than failing the question outright.
+- `backend/app/main.py` - new `/ws/ask-site` WebSocket (auth via the same `require_auth_ws` as `/ws/pipeline`): client sends `{"question", "provider", "context"}` once, server streams live action events while browsing (identical event shape to `/ws/pipeline`'s), then exactly one terminal event - `declined` or `answer`. A malformed `context` payload is ignored (falls back to live exploration) rather than failing the request.
+- `frontend/src/hooks/usePipelineRun.ts` - two small additions so a live/finished run's context is actually available to ask from: `actionsLog` (every real action for the run's lifetime, unlike `frameHistory`'s 10-frame cap for the filmstrip) and `baseUrls` (the domain's `base_url` captured off the Explorer's first `"page_loaded"` action) - lets the search bar resolve which registered domain a still-*running* provider is on, without waiting for `pipeline_done`.
+- `frontend/src/hooks/useAskSite.ts`, `frontend/src/types/asksite.ts`, `frontend/src/components/AskSiteBar.tsx` + `.css` (all new) - a fresh WebSocket per question; the bar reads `usePipelineRunContext()` and, if a run has finished for a matching domain, sends its real `exploration` as context; if a run is still going, sends the actions observed so far (domain resolved via `baseUrls` against `/api/domains`); otherwise sends no context, which correctly triggers a live check. Mounted once in `DashboardLayout`'s topbar, so it's present on every route regardless of run state - satisfying "available on the dashboard at all times" directly rather than duplicating it per page.
+
+**What was checked/modified before accepting:**
+- `backend/tests/unit/test_explorer_ask.py` (new, 7 tests) - declines an unrecognized domain without ever touching the browser; declines a hallucinated out-of-manifest domain; answers from existing context without browsing when the domain matches; ignores existing context for a *different* domain (falls through to live); answers immediately when the first page is enough; browses one action before answering; falls back to a context-answer when the action budget runs out.
+- `backend/tests/functional/test_ws_ask_site.py` (new, 7 tests) - auth required; empty question and unknown provider rejected; decline path; live action events stream before the final answer event; the provided context is actually threaded through to `ExplorerAgent.ask()`; a malformed context is ignored, not fatal.
+- `backend/tests/e2e/test_ask_site_real_browser.py` (new, 4 tests) - the actual acceptance criterion: real `ExplorerAgent.ask()`, a real Playwright browser, two real local fixture domains (reusing `login_page.html` and Day 9's `smoke_search_page.html`), three distinct query types - a direct factual question answered from the first page with zero browsing actions, a single-action behavior probe (search for a nonexistent product), a multi-action negative probe (wrong login credentials) on the *other* domain - plus one decline case for a domain that isn't registered at all. Captured live, once, outside the tests themselves as evidence the answers are genuinely observed, not scripted results dressed up as proof:
+  ```
+  === Type 2: single-action behavior probe (fixture_shop) ===
+  question: What does the site show when you search for a product that doesn't exist?
+  matched: True | domain: fixture_shop
+  actions taken: [('fill', '#search'), ('click', '#search-btn')]
+  answer: Searching for a nonexistent product shows the message There are no results found for your search.
+
+  === Type 3: multi-action negative probe (fixture_login_site)
+  question: What happens if you try to log in with the wrong username and password?
+  matched: True | domain: fixture_login_site
+  actions taken: [('fill', '#username'), ('fill', '#password'), ('click', '#login-btn')]
+  answer: Logging in with the wrong username and password does not show the welcome message - the login form stays on screen with no visible error.
+  ```
+- `frontend/src/tests/AskSiteBar.test.tsx` (new, 4 tests) - the search bar renders regardless of run state; a decline shows the "no domain knowledge" message, not a guess; a matched answer shows its domain badge; a just-finished run's real `exploration` data is genuinely what gets sent as `context` for a matching follow-up question (asserted against the exact JSON payload sent over the fake WebSocket, not just that *something* was sent).
+- Full backend suite (252 tests, +18 net) passes; frontend `tsc --noEmit`, `oxlint`, and `vitest` (37 tests, +4) all pass.
+- **Not yet completed:** the "during a run" context path resolves the active provider by picking whichever of claude/ollama has a result or base_url first - genuinely ambiguous for a "both" comparison run (which of the two providers' in-progress context should a question use?), not something this round tried to resolve properly. The search bar also always asks on the `claude` provider regardless of which model a run used - no provider picker on the bar itself yet.
+
+---
+
+## A parenless XPath-text selector variant slipped past the existing fix
+
+**Context:** A real ParaBank transfer_funds run on Groq-hosted Llama genuinely failed: step 5 ("Open the Transfer Funds page from Account Services") timed out and hit the loop guard after 3 identical attempts on `a[text='Transfer Funds']` - HIGH severity, correctly stopped the run, but the underlying cause was a bug, not the model being wrong about what to click.
+
+**Prompt:** pasted the report card, "llama is again nt working in testing wtf."
+
+**What was found:** an existing fix (way earlier this project) already handles the model writing XPath-style text matches instead of real CSS - `a[text()='Dropdown']` gets rewritten to Playwright's `text="Dropdown"`. This run's selector, `a[text='Transfer Funds']`, is a *different* malformed shape - no parens after `text` at all - which `_XPATH_TEXT_PATTERN`'s regex (`text\(\)\s*=...`, parens mandatory) never matched, so it fell straight through to Playwright unresolved and timed out against valid-looking-but-meaningless CSS, on a link that was genuinely present on the page. First attempt at broadening the regex to `text\(\)?\s*=...` still silently failed the exact real case - `\(\)?` only makes the *closing* paren optional while still requiring the opening one, not the "()" pair together; caught by testing the fix directly against the real failing string before accepting it, not just re-running the existing test suite (which wouldn't have caught this, since the old cases still passed).
+
+**What was generated:** `backend/app/agents/explorer.py` - `_XPATH_TEXT_PATTERN` corrected to `text(?:\(\))?\s*=\s*['"]([^'"]+)['"]` (the `()` grouped together as one optional unit), so both `text()='X'` and `text='X'` now resolve to `text="X"`.
+
+**What was checked/modified before accepting:**
+- Verified directly against both real strings (`a[text='Transfer Funds']` and `a[text()='Dropdown']`) via `ExplorerAgent._resolve_selector()` before touching any test file - this is what caught the first, wrong fix attempt.
+- New test `test_resolve_selector_normalizes_parenless_text_attribute_pattern`, reproducing the exact real ParaBank selector.
+- Full backend suite (253 tests, +1) passes.
+- **Not yet completed:** can't re-run the exact real ParaBank ticket against the user's own Groq setup from this sandbox (network egress blocked, no Groq key here) - the fix is verified at the selector-resolution level directly against the real failing string, not via a fresh end-to-end run against the live site.
+
+---
+
+## The "Ask anything" chatbot couldn't say why a test failed
+
+**Context:** A screenshot showed the dashboard's global chat widget asked "check what the reason llama failed," replying that it didn't have the report contents in front of it and would have to invent an answer - the day-10 `/ws/ask-site` search bar answers grounded questions about a *site*, but this separate, older, general-purpose chat (the "Ask anything" box, `/api/chat`) had no access to run history at all - its prompt only ever contained static architecture facts (registered domains/workflows), never anything about what actually happened in a real run.
+
+**Prompt:** "this shld be fixed too / this chatbot shld tell why test failed, could be one line straight forward anserbut shld tell" (with the screenshot).
+
+**What was generated:** `backend/app/main.py` - new `_recent_runs_context()` pulls the last 5 recorded runs (`history.list_runs()` + `history.get_run()` for each) and formats each one's real verdict, the Verifier's actual explanation, and every finding's real summary/error message into a compact block, injected into `/api/chat`'s prompt right alongside the existing static system facts. The prompt now explicitly tells the model to answer "why did that fail/pass" directly and specifically from this real data - assuming the most recently listed run when the question doesn't name one - instead of declining, and to only say it doesn't know when the real data genuinely doesn't cover the question (never invent).
+
+**What was checked/modified before accepting:**
+- New test reproducing the exact real complaint: records a real `PipelineResult` matching the screenshot's actual ParaBank ticket (`QnhoyKRV`, transfer_funds, the same "stopping to avoid a loop" finding and Verifier explanation from the earlier selector-fix report), asks "its done, now check what the reason llama failed" through `/api/chat`, and asserts the captured prompt actually contains the ticket id, the real finding text, and the Verifier's own explanation - not just that *some* context was added.
+- Confirmed the existing chat tests (grounded-in-real-domains, conversation history, run-ticket intent detection) still pass unchanged - the new context is additive to the prompt, not a replacement for anything already there.
+- Full backend suite (254 tests, +1) passes.
+- **Not yet completed:** capped at the last 5 runs and doesn't try to disambiguate which run the user means beyond "assume the most recent one" - a question about an older or specifically-named run several runs back could still miss if it's fallen out of that window. Same live-verification limitation as the selector fix above (no real Groq/Claude key in this sandbox to confirm the model's actual reply reads naturally, only that the real data reaches its prompt).
+
+---
+
+## The redundant-first-step skip silently ate the wrong page for Toolshop's login
+
+**Context:** A Practice Software Testing (Toolshop) login report showed a HIGH finding - "Login fails to authenticate... blocking access to the core login workflow" - despite every step showing PASS. Asked to fix "if all steps have passed why fail result." While investigating, a re-run surfaced the real smoking gun: "claude isnt filling email bar, just filling pw and loging in" - the email step wasn't even being attempted anymore, on a fresh run.
+
+**Prompt:** "this is what u need to fix / if all steps have passed why fail result" then, mid-fix, "no i reran, claude isnt filling email bar / just filling pw and loging in."
+
+**What was found:** the real root cause, once the second report changed what needed explaining. An earlier optimization (this project's own "Skipping a redundant first-step LLM call" round, built for ParaBank's "Navigate to the ParaBank homepage" step) skips a workflow's first step entirely, with no model call at all, whenever it's non-interactive AND the browser is already at `domain.base_url` right after the initial `goto()`. That check never verified the step actually *wants* `domain.base_url` - it just assumed a non-interactive first step always means "be on the homepage." Toolshop's login workflow's first step is "Navigate to the URL `https://practicesoftwaretesting.com/auth/login` (a direct page navigation...)" - a *different* page than `domain.base_url` (the plain homepage). The skip fired anyway, so the Explorer never actually navigated to the login page at all - it silently stayed on the homepage, and every step after that (fill email, fill password, click login) ran against the wrong page the whole time. That explains both symptoms: sometimes the model found *something* on the homepage it decided looked like an "Email field" and filled it (the first report); other times it correctly found none and skipped straight to whatever it could find for password/login (the second, live-observed run). Neither run was ever actually testing the login page.
+
+**What was generated:**
+- `backend/app/agents/explorer.py` - `_LITERAL_URL_PATTERN` (new) extracts a literal URL from a step's own text, if it names one. The skip check now compares the browser's current URL against *that* literal URL when the step has one, falling back to `domain.base_url` only when it doesn't (preserving the original ParaBank case, which never names a literal URL). A first step naming a different page than `domain.base_url` no longer gets treated as already-satisfied.
+- `backend/app/pdf_report.py` and `frontend/src/components/ReportCard.tsx` - separately, `_step_rows()`/`buildStepRows()` now mark the *last real action* FAIL (not PASS) when the workflow completed but the overall verdict is still "fail" - every earlier step genuinely achieved its own local goal, but the terminal step whose success the final assertion actually depends on shouldn't read as a clean, unqualified PASS sitting directly above a FAIL badge. This part stays useful as general report-clarity even now that the real underlying cause is fixed - a genuine "click succeeded, but the site didn't do what was expected" case can still happen for other reasons.
+
+**What was checked/modified before accepting:**
+- New Explorer tests: a first step naming a literal URL different from `domain.base_url` is no longer skipped (goes through the real decision loop, which is what actually navigates there); the original ParaBank-style first step with no literal URL still gets skipped exactly as before - the fix doesn't regress the case it was built for.
+- New `_step_rows`/`buildStepRows` tests: every action succeeding with an overall "fail" verdict downgrades only the last step to FAIL, both earlier steps stay PASS; a `pass_with_issues` verdict (where the real assertion WAS satisfied) leaves every step alone.
+- Full backend suite (258 tests, +4) and frontend suite (38 tests, +1) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** can't re-run the exact real Toolshop ticket against the live site from this sandbox to confirm login now actually reaches `/account` - the fix is verified at the skip-condition level directly (a first step with a differing literal URL is no longer silently treated as satisfied), not via a fresh end-to-end run against the real page. Worth a real re-run to confirm before relying on it for the demo.
+
+---
+
+## A fill that "succeeded" but the field was empty by click time
+
+**Context:** The navigation fix above worked - both providers' live views confirmed reaching the real `/auth/login` page - but Claude's login still failed to authenticate, and the live screenshot showed why: "Email is required" in red, right at the moment Login was clicked, despite the report showing the email step "Completed successfully in 2 action(s)." Re-ran it once to rule out one-off model variance - identical failure both times, same "2 action(s)" both runs. A deterministic repeat, not noise.
+
+**Prompt:** "re ran it, same email error again."
+
+**What was found:** `_execute_action`'s `fill` branch only ever checked whether Playwright's `page.fill()` call itself raised - it never checked whether the value was still there afterward. A JS-heavy form (client-side validation, a re-render clearing the field, a stale element reference from a snapshot taken just before one) can silently reset a field with no exception at all - `fill()` genuinely succeeds, Playwright has no way to know the page then undid it. Given the deterministic 2-repeat and the exact symptom (empty field, required-validation showing, right at submit time), this fully explains the mystery: the Explorer believed the field was filled because nothing ever threw, while the real page disagreed.
+
+**What was generated:** `backend/app/agents/explorer.py`'s `_execute_action()` now reads the field back (`page.locator(selector).input_value()`) immediately after every `fill`, and treats a value that doesn't match what was set as a real failure - not the `fill()` call throwing, but the *result* being wrong - with a message naming the selector and what it actually shows now, so the model sees this happened and can retry (or the report can honestly show it as a failure) instead of the action log claiming a clean success while the real field silently isn't there.
+
+**What was checked/modified before accepting:**
+- New fixture `tests/e2e/fixtures/self_clearing_field.html` - a real input whose own JS clears itself synchronously on every `input` event, reproducing the "fill succeeds, page undoes it" shape without depending on the live Toolshop site (unreachable from this sandbox) to prove it.
+- New real-browser e2e test (`test_real_browser_catches_a_fill_that_silently_gets_cleared`) - drives a real `BrowserSession`/`ExplorerAgent._execute_action()` against that fixture and confirms the fill is now correctly reported as failed, with a message naming the selector.
+- Full backend suite (259 tests, +1) passes, including the existing real-browser e2e tests (login/dialog fixtures) exercising the same new read-back code path with a normal, non-clearing field, confirming it doesn't false-positive on an ordinary successful fill.
+- **Not yet completed:** the exact reason the real Toolshop field cleared itself (framework re-render vs. probe interaction vs. something else) is still unconfirmed - this fix makes the *symptom* (a fill that doesn't stick) visible and retryable regardless of cause, rather than depending on first diagnosing which of several plausible real-site causes it actually was. Worth a real re-run to confirm the retry now recovers cleanly rather than just failing faster with a clearer message.
+
+---
+
+## "FAIL" reads as the AI failing, not as a real finding
+
+**Context:** A genuinely correct AutomationExercise newsletter-signup report - every action succeeded (75% action accuracy, no errors), the agent correctly detected the site never showed its own success confirmation - still read as a plain "FAIL" badge. Direct pushback: "that fail label is decreasing our testing rate, our validity and everything... it should not say the test has been failed... say passed, but the website is not showing that."
+
+**What was decided, and why the literal ask was declined:** relabeling this as "passed" would mean the tool lying about a real result - the whole point of an AI QA agent is catching exactly this kind of regression, and every reporting fix this project has gone through this session exists specifically to make sure a "fail" verdict at this point in the pipeline means a genuine, confirmed site defect, not a tool-side hiccup. Explained this directly rather than complying, and offered the honest alternative that actually solves the real underlying problem (looking like the AI failed, not "the result is wrong"): keep the verdict data/logic exactly as-is, but change what it's *called* on screen so nobody reads a correct finding as the tool being broken. Confirmed the wording via `AskUserQuestion` - "ISSUE FOUND" (recommended) over "BUG DETECTED" or leaving "FAIL" with added subtext.
+
+**What was generated:**
+- `frontend/src/utils/verdict.ts` (new) - `verdictLabel()`, a single shared function turning a raw verdict string into its display label - `"fail"` reads as `"ISSUE FOUND"`, everything else unchanged. Applied everywhere a verdict gets shown as text: `ReportCard.tsx`'s header badge, `History.tsx`'s and `Dashboard.tsx`'s status columns, `ComparisonSummary.tsx`'s verdict row.
+- `backend/app/pdf_report.py` - matching `_verdict_label()`, applied to both the PDF's "Overall result" and "Result" rows.
+- `backend/app/agents/reporter.py` - `_render_summary()`'s "Result: ..." line (the one posted straight to Trello, the most externally-visible artifact of all) now reads "ISSUE FOUND" too, for the same reason.
+- Deliberately scoped to the *overall verdict* label only - per-step status cells ("FAIL" on a specific action) and CSS class names (`report-badge-fail`, `history-status-fail`, etc.) are untouched. A step-level FAIL means something different (this specific action didn't execute cleanly) from the overall verdict (the site's real behavior didn't match what was expected) - conflating the two into one relabeling would blur a distinction this project has spent several rounds this session establishing.
+
+**What was checked/modified before accepting:**
+- Updated the existing "FAIL badge" tests in `ReportCard.test.tsx` and `test_reporter.py` to assert the new label - re-read each one first to confirm none were actually testing verdict *logic* (only display text), so no behavior was silently changed alongside the wording.
+- New tests: `verdict.test.ts` (frontend) and `test_verdict_label_*` (backend `pdf_report`) directly cover the label mapping in isolation.
+- Full backend suite (261 tests, +2) and frontend suite (41 tests, +3) pass; `tsc --noEmit` and `oxlint` clean.
+- **Not yet completed:** the AI-written PDF narrative (Claude's own prose summary/analysis section) still describes the raw verdict word ("fail") in its own generation prompt - the visible badges/labels are now consistent, but Claude's free-form narrative text itself wasn't specifically instructed to avoid saying "the test failed" in its own words. Worth revisiting if a generated narrative reads inconsistently with the badge above it.
+
+---
+
+## Renaming the project from "SentinelQA" to "ProTester"
+
+**Context:** the mentor flagged that "SentinelQA" collides with an existing, already-published QA product name and needs to change before the project ships further. Asked for name suggestions with one explicit, load-bearing constraint: **"change name make sure whatever name u usggest its nt alr present"** - every candidate had to be actually verified as not already in use, not just plausible-sounding. Checked each candidate live via web search before presenting it; several were caught and dropped as already taken (QAgent, ScoutQA, QAman, Verifai, Testronaut, Siteproof) before they could repeat the exact "SentinelQA already exists" mistake. Final decision: **"no go with ProTester."**
+
+**What was generated:** every literal `"SentinelQA"` occurrence in the tracked codebase replaced with `"ProTester"` - the browser tab title (`frontend/index.html`), the sidebar brand name (`DashboardLayout.tsx`), the login page brand name (`LoginPage.tsx`), the empty-state copy in the global chat (`GlobalChat.tsx`), a CSS comment (`index.css`), the Playwright e2e suite's `test.describe` name (`dashboard.spec.ts`), the FastAPI app title and the `/api/chat` system prompt's opening line (`backend/app/main.py`), and the PDF report's title `Paragraph` (`backend/app/pdf_report.py`). Also updated `README.md`'s H1 from the generic "Agentic Web QA Tester" to the actual product name, since the mentor's checklist explicitly called for the new name to be reflected "throughout the project, README, and presentation."
+
+**What was checked/modified before accepting:**
+- Grepped the full repo for `SentinelQA` before starting (8 files, 10 occurrences) and again after every file was edited, confirming zero occurrences remain anywhere in the tracked codebase.
+- Searched both `backend/tests` and `frontend/src` for any hardcoded brand-name string assertions that a pure text rename could silently break - none found, so no test files needed changes.
+- Full backend suite: 270 of 279 pass; the 9 failures are pre-existing real-browser e2e tests (`test_ask_site_real_browser.py`, `test_explorer_real_browser.py`, `test_scheduler_real_browser.py`) failing on a missing Playwright browser executable in this environment - unrelated to the rename, which touched only string literals, no logic.
+- Full frontend suite: `tsc --noEmit` clean, `oxlint` clean (only two pre-existing, unrelated fast-refresh warnings), `vitest run` 47/47 passing.
+
+---
+
+## README refresh - catching up to the actual current project
+
+**Context:** the README was frozen at its Day 1/2 state (a fake `/api/mock-run` stub, an unpopulated `frontend/src/data/services` folder that was never actually built that way) and never updated as the project grew - it didn't mention the scheduler (Day 9), the "Ask the site" search bar (Day 10), Domain Knowledge, Trello Settings, or the Claude-vs-Ollama/Groq model comparison, all of which are real, shipped features by this point. Asked directly: "README — exists, but hasn't been updated to reflect Day 9 (scheduler), Day 10 (search bar), or Trello Settings. Needs a pass."
+
+**What was generated:** surveyed the actual current codebase first (`frontend/src/pages`, `backend/app`, `backend/app/agents`, `backend/app/mcp_server`, the real sidebar nav items in `DashboardLayout.tsx`, the real `/api/*` and `/ws/*` routes in `main.py`, `backend/.env.example`, `scheduler.py`'s docstring) rather than writing from memory, then rewrote the README: updated architecture diagram (scheduler is real APScheduler now, not a stub "hook"; Explorer's model is "Ollama / Groq," not Ollama-only), a new "What it does" feature list covering every shipped page (Domain Knowledge, Trello Settings, Scheduler, Ask the site, Global chat, History/Analytics/Model Comparison), corrected frontend folder tree to match what's actually there (`components`, `contexts`, `services`, no longer-fictional `shared-components`/`data/services`), an expanded tech stack (APScheduler, ReportLab, Groq), an updated "Why these models" section explaining the Ollama/Groq toggle and both-mode side-by-side comparison, and a full environment-variable + test-command reference matching the real `.env.example` and `package.json` scripts.
+
+**What was checked/modified before accepting:**
+- Every claim in the new README was checked against real files, not assumed: nav items grepped from `DashboardLayout.tsx`, endpoints grepped from `main.py`, env vars read from `backend/.env.example`, lint/test commands cross-checked against `frontend/package.json`'s actual `scripts` block (`oxlint` takes no path argument, corrected after first draft used one).
+- No code changes involved - documentation only, so no test suite to re-run.
+
+---
+
+## Removing the Ask-the-Site search bar - redundant with the global chat assistant
+
+**Context:** a screenshot showed the topbar's "Ask about a site…" search bar mid-query ("Browsing… click on text='About Us'") right next to the existing global chat bubble - two separate ways to ask a question about a site, on the same screen. Asked directly: "remove this / we alr have AI chatbot built in." Confirmed via `AskUserQuestion` whether to just unmount the UI or delete the whole Day 10 feature outright - answer was full removal, not just hiding it.
+
+**What was removed, end to end, not just hidden:**
+- Backend: `ExplorerAgent.ask()` and its four private helpers (`_match_domain_for_question`, `_answer_from_context`, `_ask_live`, `_ask_prompt`) and the `ASK_MAX_ACTIONS` constant, all from `explorer.py`; the `/ws/ask-site` WebSocket endpoint from `main.py`; the `AskContext`/`AskResult` Pydantic models from `schema.py`. Left `/api/history/{run_id}/ask` (`AskRequest`/`AskResponse`) completely untouched - that's a different, older, unrelated feature (asks about one finished run's *stored* report, no live browsing) that happens to share the word "ask."
+- Frontend: `AskSiteBar.tsx`/`.css`, `useAskSite.ts`, `types/asksite.ts` deleted outright; unmounted from `DashboardLayout.tsx`'s topbar; `getAskSiteSocketUrl()` removed from `api.ts`; the `actionsLog`/`baseUrls` state `usePipelineRun.ts` had added specifically to feed the search bar's "richer context" (and their wiring in `reset()`, `start()`, and the `action` event handler) removed too, since nothing else ever consumed them.
+- Tests: `test_explorer_ask.py`, `test_ws_ask_site.py`, `test_ask_site_real_browser.py`, `AskSiteBar.test.tsx` all deleted (not just the feature they tested).
+- README's architecture diagram and feature list updated to drop the search bar mention.
+
+**What was checked before accepting:**
+- Grepped the whole repo (case-insensitive) for every ask-site-specific symbol (`AskSiteBar`, `AskContext`, `AskResult`, `_ask_live`, `getAskSiteSocketUrl`, etc.) after the removal - zero hits outside `prompts.md`'s own historical log of building the feature in the first place.
+- Explicitly verified `/api/history/{run_id}/ask` and its `AskRequest`/`AskResponse` models were left alone - the shared "ask" naming made it easy to over-delete, so checked this feature's own tests still exist and weren't touched.
+- Full backend suite (255 tests, -24 net) and frontend suite (43 tests, -4 net) pass; `tsc --noEmit` and `oxlint` clean (only the two pre-existing, unrelated fast-refresh warnings).
+
+---
+
+## Trello Settings actually validating credentials, a real "Connect with Trello" flow, and gating ticket runs on it
+
+**Context:** a screenshot of the Trello Settings page showed the API key field holding `admin` (the dashboard's own login username) with `admin123` as the token. Investigated directly rather than guessing: `save_trello_settings()` and `POST /api/trello/settings` only ever checked the fields weren't *empty* - anything non-empty, including a dashboard login typed in by habit, got saved and shown as "Connected from this dashboard" with a green checkmark, never actually verified against Trello's real API. Confirmed to the user this wasn't the dashboard login being silently reused (two completely separate storage locations) - it was the UI lying about whether the saved values would actually work.
+
+Follow-up ask, in the user's words: "shldnt it work like we use our trello username and trello API key as token instead of pw... why to complicate everything... right after logging in it should ask to connect trello account for ticket acceptance so that user goes straight to trello and then come back add ticket." Explained honestly that literal username+password auth against Trello's API isn't possible (no API accepts a raw password, Trello's own security model requires a key+token pair) - but that Trello's real "authorize" redirect flow delivers exactly the experience being asked for: click a button, log into Trello on Trello's own page, approve, get sent back automatically with the token captured, no manual copy-paste, real Trello password never touching this app. Clarified the gating scope via `AskUserQuestion` then a direct follow-up correction: not a blocking screen after login - the prompt to connect should appear specifically when a ticket is about to be run, since (confirmed by reading `planner.py`) every real run genuinely calls `get_ticket()` unconditionally, so Trello truly is a hard prerequisite for that one action, not for browsing the dashboard generally.
+
+**What was generated:**
+- `backend/app/mcp_server/trello_client.py` - `verify_trello_credentials(api_key, token)`, a real `GET /1/members/me` call against Trello's API; raises `TrelloError` on a 401 or any other failure, with a message specific enough to act on.
+- `backend/app/main.py` - `POST /api/trello/settings` now calls `verify_trello_credentials()` before saving anything at all, returning 400 with Trello's own rejection reason if the credentials don't actually work; a typo or a placeholder can no longer be saved and shown as connected. `/ws/pipeline` gated: checks `_trello_status().connected` right after validating the ticket_id/model, before touching the Planner at all, sending a clear `error` event ("every ticket run reads its details from Trello...") instead of failing deeper in the pipeline with a more confusing error.
+- `frontend/src/pages/TrelloSettings.tsx` - new "Connect with Trello" button building Trello's real `https://trello.com/1/authorize` URL (key + `response_type=token` + a `return_url` back to this same page), stashing the API key in `sessionStorage` before the redirect (it doesn't survive the round trip any other way), then a mount-time effect that reads the token Trello appends as a URL fragment (`#token=...` - never sent to any server, only readable by this page's own JS) and auto-saves it through the same, now-validating, `POST /api/trello/settings`. The manual key+token paste form stays as a secondary "or paste a token you already have" path for anyone who already has both.
+- `frontend/src/pages/RunTest.tsx` - fetches `/api/trello/status` on mount; when not connected, shows an inline "Trello isn't connected yet... Connect Trello" banner with a link to the settings page, and disables the ticket ID field, model selector, and submit button so a run can't even be attempted - the backend's `/ws/pipeline` gate above is the authoritative backstop for any other path (e.g. the global chat's "run ticket X").
+
+**What was checked/modified before accepting:**
+- Caught a real bug while adding tests: the existing `POST /api/trello/settings` functional tests didn't mock the new outbound Trello call, and the full suite hung for over two minutes hitting a blocked real network call from the sandbox before timing out - fixed by adding `httpx_mock` responses to every affected test, and by adding an autouse `TRELLO_API_KEY`/`TRELLO_TOKEN` fixture to `test_ws_pipeline.py` so its tests (about pipeline event streaming, not the new Trello gate) keep passing unaffected.
+- New backend tests: `verify_trello_credentials` unit tests (success, Trello-rejects, network error); a functional test confirming a save with credentials Trello itself rejects (`admin`/`admin123`, the exact real values from the screenshot) returns 400 and leaves the connection status untouched at "not connected"; a new `/ws/pipeline` test confirming a disconnected Trello state returns the specific error event and the pipeline (`run_pipeline`) is never actually invoked.
+- New frontend tests: Connect-with-Trello with no API key shows an inline error and never touches `sessionStorage`/navigates; with a key, it's stashed and `window.location.href` is built correctly; returning with a `#token=...` fragment and a stashed key auto-saves and clears both the fragment and the stashed key; returning with a token but no stashed key (lost across the redirect) shows an error instead of silently failing to save. `RunTest.tsx`: the connect prompt and disabled form appear when Trello isn't connected, and don't when it is.
+- Full backend suite (260 tests, +5) and frontend suite (49 tests, +6) pass; `tsc --noEmit` and `oxlint` clean.
+
+---
+
+## Deployment prep: backend config for Railway (separate PR from the frontend one)
+
+**Context:** deciding on a hosting plan for the presentation - compared ngrok/Cloudflare Tunnel (free, but only reachable while a laptop stays on and running) against Railway (a real trial-based host, no laptop dependency) and Oracle Cloud's Always Free tier (genuinely free forever but with real friction: card required, idle-resource reclaim risk, capacity-limited signups) - landed on Railway's 30-day trial for the backend + Vercel/Netlify for the frontend, since the demo is next week and that window comfortably covers it. Asked explicitly for separate PRs for the frontend and backend deployment changes, and confirmed upfront that the actual account creation/deploy-button clicks on Railway's and Vercel's own dashboards has to happen on the user's end - this session can prepare and push the code changes, not sign into third-party hosting accounts.
+
+**What was found, before writing anything:** grepped the repo for any existing deployment config (Procfile, railway.json, vercel.json) - none existed. Two real gaps that would break a real deployment, not just missing config: `backend/app/main.py`'s CORS `allow_origins` was hardcoded to `http://localhost:5173` only, and `backend/requirements.txt` has no post-install step to fetch Playwright's actual Chromium binary, without which every browser-driven run would fail immediately on a fresh host.
+
+**What was generated (backend half):**
+- `backend/app/main.py` - `allow_origins` now includes `http://localhost:5173` (default, unchanged) plus any origins from a new comma-separated `ALLOWED_ORIGINS` env var, so a deployed frontend's real URL can be allowed without touching this file again.
+- `backend/railway.json` (new) - `build.buildCommand` runs `pip install -r requirements.txt && playwright install --with-deps chromium` (the actual browser binary, not just the Python package); `deploy.startCommand` runs `uvicorn app.main:app --host 0.0.0.0 --port $PORT`, reading Railway's dynamically-assigned port instead of the hardcoded 8000 used for local dev.
+- `backend/.env.example` - documented the new `ALLOWED_ORIGINS` var alongside the existing ones.
+
+**What was checked before accepting:**
+- Full backend suite (260 tests) still passes unchanged - the CORS default behavior (localhost:5173 only, nothing extra) is exactly what every existing test already implicitly relies on.
+- `ALLOWED_ORIGINS` is read once, at module import time (same as every other env-var-driven config in this file) - the existing test harness imports `app.main` once, early, before any per-test env var could apply, so a full automated test would need an awkward module reload for a two-line list comprehension. Verified directly instead: imported `app.main` fresh with `ALLOWED_ORIGINS` set to two comma-separated URLs (with stray whitespace) and confirmed the CORS middleware's actual configured `allow_origins` list came out correctly trimmed and combined with the default.
+
+---
+
+## Deployment prep: frontend config for Vercel (separate PR from the backend one), plus a real production-build bug it surfaced
+
+**Context:** the other half of the Railway/Vercel deployment plan - the frontend's `API_BASE_URL` was hardcoded to `http://localhost:8000`, which would try to reach the presenter's own laptop even once deployed on Vercel and pointed at a real backend.
+
+**What was generated:**
+- `frontend/src/config.ts` - `API_BASE_URL` now reads `import.meta.env.VITE_API_BASE_URL` (a Vercel/Netlify build-time env var) first, falling back to `http://localhost:8000` unchanged for local dev - no code edit needed to point at a real deployed backend.
+- `frontend/.env.example` (new) - documents `VITE_API_BASE_URL`, noting it belongs in the hosting platform's own dashboard, not a committed file, since it changes per deployment.
+- `frontend/vercel.json` (new) - a catch-all rewrite to `index.html`, needed because this is a client-side-routed SPA (react-router) - without it, directly opening or refreshing a deep link like `/history` on Vercel 404s instead of loading the app.
+
+**What was found while verifying, not assumed fixed just because `tsc --noEmit` was clean:** this project's established verification routine only ever ran `tsc --noEmit` (a looser check) - `npm run build` (`tsc -b && vite build`, the actual command Vercel runs) had never once been exercised. Running it for real surfaced three genuine, pre-existing compile errors that would have broken the actual Vercel deployment, unrelated to this round's own change: `ReportCard.tsx`'s `buildStepRows()` was typed to take `ExplorationResult | undefined` while the real `PipelineResult.exploration` field is `ExplorationResult | null` (a real mismatch already tolerated only because `?.`-optional-chaining happened to handle `null` fine at runtime); and two test files' `constructor(public url: string)` TypeScript parameter-property shorthand, which isn't allowed under the project's `erasableSyntaxOnly` compiler option since it requires actual code generation, not pure type erasure. Confirmed these were pre-existing (not introduced by this round) by running the same build against the unmodified base branch first.
+
+**What was generated (the build fix):**
+- `ReportCard.tsx` - `buildStepRows()`'s `exploration` parameter widened to `ExplorationResult | null | undefined`, matching the real type it's actually called with.
+- `GlobalChat.test.tsx` and `PipelineRunContext.test.tsx` - `FakeWebSocket`'s constructor rewritten as an explicit `url: string` field + plain assignment in the constructor body, instead of the shorthand `constructor(public url: string)`.
+
+**What was checked before accepting:**
+- Grepped the whole frontend for any other `constructor(public|private|protected|readonly ...)` shorthand - none found, so no other file was silently carrying the same latent build failure.
+- `npm run build` (the actual Vercel/Netlify build command) now succeeds end to end; inspected the built `dist/assets/*.js` output directly and confirmed a test `VITE_API_BASE_URL` value passed at build time was genuinely baked into the bundle, not just accepted without effect.
+- Full frontend suite (49 tests), `tsc --noEmit`, and `oxlint` all still pass after the type/syntax fixes - confirmed these were pure type-level/syntax corrections with no behavior change.
+
+---
+
+## One last leftover "sentinelqa" the earlier rename sweep missed
+
+**Context:** spotted while reviewing `ReportCard.tsx` for the deployment PRs - the downloaded PDF report's filename still read `sentinelqa-report-...pdf`, missed by the earlier rename because it wasn't the literal string `"SentinelQA"` the original grep searched for.
+
+**What was found:** grepping specifically for the lowercase `sentinelqa` (not just the exact `SentinelQA` casing) turned up two matches, not one - the same filename pattern exists independently in both `frontend/src/components/ReportCard.tsx`'s download button and `backend/app/main.py`'s `/api/history/{run_id}/report.pdf` endpoint (the `Content-Disposition` filename actually served to the browser).
+
+**What was generated:** both changed to `protester-report-...pdf`.
+
+**What was checked before accepting:** grepped both `backend/` and `frontend/` for any remaining `sentinelqa` (case-insensitive) - zero hits; confirmed no test asserts the old filename string, so nothing else needed updating.
+
+---
+
+## Netlify SPA routing (switched from Vercel after the fact)
+
+**Context:** decided to deploy the frontend to Netlify instead of Vercel (already familiar with it from a previous project) - `vercel.json`'s rewrite rule only applies on Vercel, so Netlify needed its own equivalent to avoid the same deep-link-404-on-refresh problem for this client-side-routed (react-router) app.
+
+**What was generated:** `frontend/public/_redirects` (new) - `/* /index.html 200`, Netlify's own SPA-fallback config format. `public/` contents are copied verbatim into `dist/` by Vite at build time, which is where Netlify looks for it.
+
+**What was checked before accepting:** ran the real `npm run build` and confirmed `dist/_redirects` came out with the exact expected content, not just that the source file existed.

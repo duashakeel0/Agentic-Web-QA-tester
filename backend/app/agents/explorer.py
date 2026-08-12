@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from collections.abc import Awaitable, Callable
 
 from playwright.async_api import Error as PlaywrightError
@@ -75,17 +76,28 @@ _NAVIGATION_ONLY_PREFIXES = ("navigate to", "wait for")
 # A selector starting with any of these is already a real CSS selector
 # (id/class/attribute/combinator) and left alone by _resolve_selector.
 _CSS_SELECTOR_PREFIX_CHARS = ("#", ".", "[", "*", ">", "~", "+", ":")
-# Ollama's Llama 3.1 sometimes writes an XPath-style text match where a CSS
-# selector is expected - a[text()='Dropdown'] or a:contains('Dropdown') -
-# which isn't valid CSS/Playwright syntax and never matches anything. The
-# *intent* (match by visible text) is real, though, and maps directly onto
-# Playwright's own text= selector engine.
-_XPATH_TEXT_PATTERN = re.compile(r"""text\(\)\s*=\s*['"]([^'"]+)['"]""")
+# Llama (both local and Groq-hosted) sometimes writes an XPath-style text
+# match where a CSS selector is expected - a[text()='Dropdown'],
+# a[text='Transfer Funds'] (the ()-less variant, seen for real on a
+# ParaBank run against Groq), or a:contains('Dropdown') - none of which
+# are valid CSS/Playwright syntax and never match anything real, so the
+# click just times out against a genuinely-present element with the
+# wrong selector syntax. The *intent* (match by visible text) is real
+# though, and maps directly onto Playwright's own text= selector engine.
+# "()" is optional here on purpose to catch both variants with one regex -
+# grouped as (?:\(\))? rather than \(\)?, since the latter only makes the
+# closing paren optional while still requiring the opening one, which
+# silently fails to match the ()-less variant this was added for.
+_XPATH_TEXT_PATTERN = re.compile(r"""text(?:\(\))?\s*=\s*['"]([^'"]+)['"]""")
 _CONTAINS_TEXT_PATTERN = re.compile(r"""contains\([^,)]*,?\s*['"]([^'"]+)['"]\s*\)""")
 # Matches only a plain "#some-id" selector - not "#foo .bar", "#foo[x=y]",
 # or anything more elaborate - since only this simple shape is safe to
 # rewrite by matching against a single element's real id.
 _BARE_ID_SELECTOR_PATTERN = re.compile(r"^#([\w-]+)$")
+# A literal URL named in a step's own text (e.g. "Navigate to the URL
+# https://x/auth/login") - used by the redundant-first-step skip below to
+# check the step's real target, not just assume it means domain.base_url.
+_LITERAL_URL_PATTERN = re.compile(r"https?://\S+")
 
 _SNAPSHOT_JS = """
 () => Array.from(document.querySelectorAll(
@@ -174,21 +186,34 @@ class ExplorerAgent:
             )
 
             for index, step in enumerate(plan.steps):
-                if (
-                    index == 0
-                    and not self._is_interactive_step(step)
-                    and self._same_url(self._browser.page.url, domain.base_url)
-                ):
-                    # The goto() above already put the browser on
-                    # domain.base_url - a first step that's just asking to
-                    # be "on the homepage"/navigated to that same page is
-                    # therefore already satisfied, deterministically, with
-                    # no model call needed at all. Skips a weaker model
-                    # sometimes ignoring the nav_hint instruction not to
-                    # interact here and inventing an unnecessary click
-                    # instead (e.g. a hallucinated, nonexistent "#home"
-                    # selector that only ever times out).
-                    continue
+                if index == 0 and not self._is_interactive_step(step):
+                    url_match = _LITERAL_URL_PATTERN.search(step)
+                    # A first step naming a literal URL ("Navigate to the
+                    # URL https://x/auth/login") must be checked against
+                    # THAT exact URL, not unconditionally against
+                    # domain.base_url - the two happen to be the same for
+                    # a step like "Navigate to the ParaBank homepage" (no
+                    # literal URL, falls back to base_url below), but are
+                    # very much not the same for a workflow whose first
+                    # step deliberately routes past the homepage to a
+                    # specific page. Comparing against base_url
+                    # unconditionally used to silently treat a first step
+                    # asking for a completely different page as already
+                    # satisfied - confirmed for real on Toolshop's login
+                    # workflow, where this skipped the required navigation
+                    # to /auth/login entirely and left every step after it
+                    # running against the homepage instead.
+                    target_url = url_match.group(0).rstrip(").,;:'\"") if url_match else domain.base_url
+                    if self._same_url(self._browser.page.url, target_url):
+                        # The goto() above already put the browser on this
+                        # step's real target - it's therefore already
+                        # satisfied, deterministically, with no model call
+                        # needed at all. Skips a weaker model sometimes
+                        # ignoring the nav_hint instruction not to
+                        # interact here and inventing an unnecessary click
+                        # instead (e.g. a hallucinated, nonexistent "#home"
+                        # selector that only ever times out).
+                        continue
 
                 if not broken_input_done and self._is_interactive_step(step):
                     await self._attempt_broken_input(step, actions)
@@ -398,6 +423,27 @@ class ExplorerAgent:
         try:
             if action == "fill":
                 await page.fill(selector, value or "", timeout=ACTION_TIMEOUT_MS)
+                # fill() succeeding only means the call didn't throw - it
+                # doesn't guarantee the value is still there afterward. A
+                # JS-heavy form (client-side validation clearing/resetting
+                # a field on its own re-render, a stale element reference
+                # from a snapshot taken just before one) can silently
+                # leave the field empty again with no error at all -
+                # confirmed for real on a Toolshop login run where the
+                # email field showed "Email is required" at click time
+                # despite being logged as filled successfully twice in a
+                # row. Reading back what's actually in the field now and
+                # treating a mismatch as a real failure (instead of a
+                # false "success") is what lets the model see this
+                # happened and retry properly, rather than the report
+                # showing every action passed while login silently never
+                # had a real email in it.
+                actual_value = await page.locator(selector).input_value(timeout=ACTION_TIMEOUT_MS)
+                if (value or "") != actual_value:
+                    return False, (
+                        f"Fill on {selector!r} didn't stick - the field now shows {actual_value!r} "
+                        "instead of the value that was set. The page likely reset it after filling."
+                    )
             elif action == "click":
                 await page.click(selector, timeout=ACTION_TIMEOUT_MS)
             elif action == "select":

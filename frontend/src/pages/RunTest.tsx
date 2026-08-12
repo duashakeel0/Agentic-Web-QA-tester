@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { AlertTriangle, Rocket, RotateCcw } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { AlertTriangle, KeyRound, Rocket, RotateCcw } from "lucide-react";
 import ComparisonSummary from "../components/ComparisonSummary";
 import LiveBrowserView from "../components/LiveBrowserView";
 import ModelSelector from "../components/ModelSelector";
@@ -7,6 +8,7 @@ import PipelineTimeline from "../components/PipelineTimeline";
 import ReportCard from "../components/ReportCard";
 import TalkingAgentsPanel from "../components/TalkingAgentsPanel";
 import { usePipelineRunContext } from "../contexts/PipelineRunContext";
+import { apiGet } from "../services/api";
 import type { ModelChoice, Provider } from "../types/pipeline";
 import "./RunTest.css";
 
@@ -14,14 +16,30 @@ import "./RunTest.css";
 // provider's full report, then the comparison beneath both.
 const PROVIDER_ORDER: Provider[] = ["claude", "ollama"];
 
+interface TrelloStatus {
+  connected: boolean;
+}
+
 function RunTest() {
   const [ticketId, setTicketId] = useState("");
   const [model, setModel] = useState<ModelChoice>("claude");
   const { status, feed, stages, frames, frameHistory, results, comparison, errorMessage, start, reset } =
     usePipelineRunContext();
 
+  // Every ticket run reads its details from Trello, so there's no point
+  // letting someone submit a ticket ID before that's set up - checked
+  // once up front rather than only finding out after the backend rejects
+  // the run, which would otherwise be the first sign anything was wrong.
+  const [trelloConnected, setTrelloConnected] = useState<boolean | null>(null);
+  useEffect(() => {
+    apiGet<TrelloStatus>("/api/trello/status")
+      .then((data) => setTrelloConnected(data.connected))
+      .catch(() => setTrelloConnected(null));
+  }, []);
+
   const running = status === "connecting" || status === "running";
   const resultList = PROVIDER_ORDER.map((p) => results[p]).filter((r) => r !== undefined);
+  const needsTrello = trelloConnected === false;
 
   return (
     <div className="run-test-page">
@@ -30,12 +48,25 @@ function RunTest() {
         Enter a Trello ticket ID for a registered website and pick which model(s) should drive the agents.
       </p>
 
+      {needsTrello && (
+        <div className="run-test-connect-trello">
+          <KeyRound size={16} aria-hidden="true" />
+          <span>
+            Trello isn't connected yet - every ticket run reads its details from Trello, so connect it before
+            running one.
+          </span>
+          <Link to="/trello-settings" className="run-test-connect-trello-link">
+            Connect Trello
+          </Link>
+        </div>
+      )}
+
       <div className="run-test-panel">
         <form
           className="run-test-form"
           onSubmit={(event) => {
             event.preventDefault();
-            if (ticketId.trim()) start(ticketId.trim(), model);
+            if (ticketId.trim() && !needsTrello) start(ticketId.trim(), model);
           }}
         >
           <label className="run-test-field">
@@ -45,14 +76,14 @@ function RunTest() {
               value={ticketId}
               onChange={(event) => setTicketId(event.target.value)}
               placeholder="e.g. 66f2a1b3c9d4e5f6a7b8c9d0"
-              disabled={running}
+              disabled={running || needsTrello}
             />
           </label>
 
-          <ModelSelector value={model} onChange={setModel} disabled={running} />
+          <ModelSelector value={model} onChange={setModel} disabled={running || needsTrello} />
 
           <div className="run-test-actions">
-            <button type="submit" disabled={running || !ticketId.trim()}>
+            <button type="submit" disabled={running || needsTrello || !ticketId.trim()}>
               <Rocket size={16} aria-hidden="true" />
               {running ? "Running…" : "Start Test"}
             </button>

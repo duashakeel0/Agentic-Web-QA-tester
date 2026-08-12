@@ -1,5 +1,17 @@
+import pytest
+
 import app.main as main_module
 from app.agents.schema import PipelineResult, TestPlan
+
+
+@pytest.fixture(autouse=True)
+def trello_connected(monkeypatch):
+    # Every ticket run now requires Trello to be connected - these tests
+    # are about the pipeline's own event streaming, not about that gate,
+    # so it's satisfied here by default. test_trello_not_connected_* below
+    # explicitly unsets it to test the gate itself.
+    monkeypatch.setenv("TRELLO_API_KEY", "fake-key")
+    monkeypatch.setenv("TRELLO_TOKEN", "fake-token")
 
 
 def _fake_result(provider):
@@ -67,6 +79,27 @@ def test_invalid_model_returns_error_event(client, auth_token):
         event = ws.receive_json()
     assert event["type"] == "error"
     assert "gpt4" in event["message"]
+
+
+def test_trello_not_connected_returns_error_event_and_never_starts_the_pipeline(client, auth_token, monkeypatch):
+    monkeypatch.delenv("TRELLO_API_KEY", raising=False)
+    monkeypatch.delenv("TRELLO_TOKEN", raising=False)
+    started = False
+
+    async def fake_run_pipeline(ticket_id, provider, on_event=None):
+        nonlocal started
+        started = True
+        return _fake_result(provider)
+
+    monkeypatch.setattr(main_module, "run_pipeline", fake_run_pipeline)
+
+    with client.websocket_connect(f"/ws/pipeline?token={auth_token}") as ws:
+        ws.send_json({"ticket_id": "T1", "model": "claude"})
+        event = ws.receive_json()
+
+    assert event["type"] == "error"
+    assert "Trello isn't connected" in event["message"]
+    assert started is False
 
 
 def test_pipeline_exception_becomes_error_event(client, auth_token, monkeypatch):
