@@ -37,7 +37,7 @@ Four agents cooperate through a shared FastAPI backend, each with one narrow job
 - **Verifier** — re-runs the steps behind any flagged issue once before it's accepted as a confirmed bug
 - **Reporter** — writes the final severity-ranked report and posts a summary back to the originating Trello ticket
 
-This scaffold (Day 1) stubs the pipeline with a fake `/api/mock-run` endpoint so the frontend/backend wiring is proven before any real agent logic exists — the four agents above get built out over the following tickets.
+Day 1 stubbed the pipeline with a fake `/api/mock-run` endpoint so the frontend/backend wiring was proven before any real agent logic existed. Day 2 replaces that with a real Playwright-driven browser behind a WebSocket (`/ws/run`): the dashboard sends a URL, the backend launches a browser, navigates there, and streams live status updates back as it happens — the same live-connection pattern the four agents above will report through once they exist.
 
 ## Frontend structure
 
@@ -62,7 +62,7 @@ Not every folder is populated yet — `layouts`, `routes`, `shared-components`, 
 
 - **Frontend:** React + TypeScript, built with Vite
 - **Backend:** Python, FastAPI
-- **Browser automation:** Playwright (added in a later ticket)
+- **Browser automation:** Playwright
 - **MCP:** a custom MCP server wrapping the Trello API
 - **Storage:** SQLite
 
@@ -81,6 +81,7 @@ cd backend
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
+playwright install chromium
 uvicorn app.main:app --port 8000
 ```
 
@@ -91,7 +92,7 @@ npm install
 npm run dev
 ```
 
-Then open `http://localhost:5173` — it fetches from the backend's mock endpoint and renders a fake test-run result end to end.
+Then open `http://localhost:5173`, enter a URL, and click "Run test" — the dashboard opens a WebSocket to the backend, which launches a real headless browser, navigates to that URL, and streams live status updates back until it reports the page's title.
 
 The backend also auto-generates interactive API docs at `http://localhost:8000/docs` (FastAPI's built-in OpenAPI/Swagger support) — no extra setup needed.
 

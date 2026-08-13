@@ -40,3 +40,25 @@ Running log of significant AI prompts used to build this project, per the intern
 **What was checked/modified before accepting:**
 - Ran `npm run lint` and `tsc -b && npm run build` again after the move — clean
 - Re-ran the full end-to-end browser check with Playwright to make sure the restructure didn't silently break anything — it initially appeared to fail, but the cause was a stale test running on the wrong port (5174 instead of the CORS-allowed 5173), not an actual bug in the restructured code. Re-verified on the correct port and confirmed the page still renders the mock result correctly.
+
+---
+
+## Day 2 — Browser Driver & Live Dashboard Connection
+
+**Prompt:** Replace the Day 1 mock data flow with a real Playwright browser driver on the backend, connected to the dashboard over a WebSocket instead of a one-off fetch, so status updates stream to the frontend live as a real browser action happens.
+
+**What was generated:**
+- `backend/app/browser.py` — a `BrowserSession` class wrapping Playwright's async API (start a browser, navigate, read the page title, close)
+- `backend/app/main.py` — a new `/ws/run` WebSocket endpoint: accepts a URL from the client, launches a browser, and streams `status` messages as each step happens, then a final `done` (or `error`) message
+- `frontend/src/types/liveRun.ts` — types for the WebSocket message shapes
+- `frontend/src/data/services/liveRunService.ts` — builds the WebSocket URL
+- `frontend/src/hooks/useLiveRun.ts` — opens the WebSocket, sends the URL, and tracks the incoming log/result/error/running state
+- `pages/Dashboard.tsx` — replaced the Day 1 mock display with a URL input, "Run test" button, and a live log view
+- Removed the now-unused Day 1 mock files (`useMockRun.ts`, `testRunService.ts`, `types/testRun.ts`) since the live driver replaces that flow
+- `requirements.txt` — added `playwright`; removed `uvloop` (an optional performance extra that doesn't build on Windows and wasn't needed)
+- README updated to describe the WebSocket flow and add the `playwright install chromium` setup step
+
+**What was checked/modified before accepting:**
+- Ran `npm run lint` and `tsc -b && npm run build` on the frontend — clean
+- Verified the backend imports and starts correctly with the new Playwright dependency
+- Ran the full flow live in a real browser with Playwright: opened the dashboard, entered a URL, clicked "Run test," and confirmed the live log messages ("Launching browser...", "Navigating to...") and the final page-title result rendered correctly end to end over the actual WebSocket connection — not assumed from code alone
