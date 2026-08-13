@@ -94,3 +94,29 @@ Running log of significant AI prompts used to build this project, per the intern
 **What was checked/modified before accepting:**
 - Verified live against a real Trello board via MCP Inspector: `get_ticket` returns the correct title, description, and real checklist items (with their checked state); `post_summary` posts a real, confirmed comment (verified by the returned `comment_id` and visually on the card)
 - Verified the error path live: an invalid ticket ID now returns a clean structured error with no crash and no leaked credentials, instead of the raw exception seen before the fix
+
+---
+
+## PR Review Fixes — Days 1 & 2
+
+**Context:** Real review comments came back on both PRs. Applied all of them rather than deferring to a later cleanup pass.
+
+**What was changed:**
+- API versioned to `/api/v1/health` and `/api/v1/mock-run`
+- CORS middleware now explicitly sets `allow_credentials=False`
+- Health endpoint returns service name and version alongside status
+- `requirements.txt` slimmed to primary dependencies only (`fastapi`, `uvicorn[standard]`, `playwright`, `pydantic`, `python-dotenv`, plus `mcp[cli]`/`httpx` for the upcoming Trello ticket) — transitive dependencies now resolve through pip instead of being pinned individually
+- `main.py` docstrings reworded from "later tickets" to "future milestones"
+- Frontend HTML `<title>` changed from the default `frontend` to `Agentic Web QA Tester`
+- Root and frontend `.gitignore` consolidated into one file at the repo root
+- README's architecture diagram now visually groups the backend and all agents inside one subgraph, with a note that the frontend only ever talks to the backend
+- WebSocket URL moved out of hardcoded frontend code into `VITE_WS_URL` (with a `.env.example` added), defaulting to the local dev value if unset
+- `useLiveRun` now explicitly closes the WebSocket once a run finishes (or errors), and closes it on unmount, instead of leaving the connection open
+- Backend now validates the submitted URL is a well-formed `http://`/`https://` address before touching Playwright, returning a clear error instead of letting a malformed URL fail deep in browser automation
+- Live log's React key changed from the raw message text to an index-based key, so duplicate status messages can't collide
+
+**What was checked/modified before accepting:**
+- Ran `npm run lint` and `tsc -b && npm run build` — clean
+- Installed the slimmed `requirements.txt` into a brand-new virtualenv to confirm every transitive dependency (websockets, httptools, watchfiles) still resolves correctly through `uvicorn[standard]`, rather than assuming it would
+- Verified live in a real browser: an invalid URL now shows a friendly validation error instead of failing inside Playwright; a normal run still completes correctly; the browser tab title now reads correctly
+- Confirmed via Playwright's WebSocket event listener that the `/ws/run` connection actually closes after a run completes, instead of just trusting the code change

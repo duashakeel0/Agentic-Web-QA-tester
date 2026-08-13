@@ -47,8 +47,8 @@ function Dashboard() {
 
         {log.length > 0 && (
           <div className="log-console">
-            {log.map((line) => (
-              <div className="log-line" key={line}>
+            {log.map((line, index) => (
+              <div className="log-line" key={`${index}-${line}`}>
                 <span className="log-arrow">→</span> {line}
               </div>
             ))}
