@@ -1,61 +1,175 @@
-.app {
+.page {
+  width: 100%;
   max-width: 640px;
   margin: 0 auto;
-  padding: 3rem 1.5rem;
+  padding: 2.75rem 1.5rem 2rem;
   text-align: left;
 }
 
-.subtitle {
-  color: #666;
-  margin-top: -0.5rem;
+.hero {
+  text-align: center;
+  margin-bottom: 2.5rem;
 }
 
-.error {
-  color: #b3261e;
+.eyebrow {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: var(--accent-bg);
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  padding: 4px 14px;
+  margin-bottom: 1rem;
 }
 
-.result-card {
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1.25rem 1.5rem;
-  margin-top: 1.5rem;
+.hero h1 {
+  margin: 0 0 0.5rem;
+  font-size: 40px;
 }
 
-.result-card .summary {
-  margin-top: 1rem;
-  font-style: italic;
+.hero .subtitle {
+  color: var(--text);
+  font-size: 16px;
+  max-width: 440px;
+  margin: 0 auto;
+}
+
+.panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 1.75rem;
 }
 
 .run-controls {
   display: flex;
   gap: 0.75rem;
-  margin-top: 1rem;
 }
 
 .run-controls input {
   flex: 1;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
+  padding: 0.7rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  color: var(--text-h);
+  font-size: 15px;
+}
+
+.run-controls input:focus {
+  outline: none;
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
 }
 
 .run-controls button {
-  padding: 0.5rem 1.25rem;
-  border-radius: 6px;
+  padding: 0.7rem 1.5rem;
+  border-radius: 10px;
   border: none;
-  background: #333;
+  background: var(--accent);
   color: #fff;
+  font-weight: 600;
+  font-size: 15px;
   cursor: pointer;
+  transition: opacity 0.15s ease;
+  white-space: nowrap;
+}
+
+.run-controls button:hover:not(:disabled) {
+  opacity: 0.9;
 }
 
 .run-controls button:disabled {
-  background: #999;
+  background: var(--border);
+  color: var(--text);
   cursor: not-allowed;
 }
 
-.log-list {
-  margin: 0.5rem 0 0;
-  padding-left: 1.25rem;
-  font-family: monospace;
-  font-size: 0.9rem;
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1.1rem;
+  font-size: 14px;
+  color: var(--text);
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--border);
+}
+
+.status-dot.status-running {
+  background: #f5a524;
+  box-shadow: 0 0 0 4px rgba(245, 165, 36, 0.2);
+}
+
+.status-dot.status-done {
+  background: #17c964;
+  box-shadow: 0 0 0 4px rgba(23, 201, 100, 0.2);
+}
+
+.status-dot.status-error {
+  background: #f31260;
+  box-shadow: 0 0 0 4px rgba(243, 18, 96, 0.2);
+}
+
+.error {
+  margin-top: 1rem;
+  color: #f31260;
+  font-size: 14px;
+}
+
+.log-console {
+  margin-top: 1.25rem;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  font-family: var(--mono);
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: var(--text-h);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.log-arrow {
+  color: var(--accent);
+}
+
+.result-card {
+  margin-top: 1.25rem;
+  border: 1px solid var(--accent-border);
+  background: var(--accent-bg);
+  border-radius: 10px;
+  padding: 1rem 1.25rem;
+}
+
+.result-label {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.result-url {
+  margin: 0.35rem 0 0;
+  font-family: var(--mono);
+  font-size: 14px;
+  color: var(--text-h);
+  word-break: break-all;
+}
+
+.result-title {
+  margin: 0.35rem 0 0;
+  font-style: italic;
+  color: var(--text);
 }
