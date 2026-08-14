@@ -1,0 +1,70 @@
+import { API_BASE_URL } from "../config";
+import { tokenStorage } from "./tokenStorage";
+
+export class ApiError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** Authenticated fetch wrapper - reads the token straight from storage
+ * rather than through AuthContext, so plain data-fetching code (hooks,
+ * services) doesn't need to be a React component to use it. A 401 here
+ * always means the token expired/was invalidated (e.g. logged out
+ * elsewhere), so the caller can redirect to /login on that status. */
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const token = tokenStorage.getToken();
+  const headers = new Headers(init.headers);
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`);
+  }
+
+  const response = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new ApiError(response.status, body?.detail || `Request to ${path} failed (${response.status}).`);
+  }
+  return response;
+}
+
+export async function apiGet<T>(path: string): Promise<T> {
+  const response = await apiFetch(path);
+  return (await response.json()) as T;
+}
+
+export async function apiPost<T>(path: string, body: unknown): Promise<T> {
+  const response = await apiFetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  return (await response.json()) as T;
+}
+
+export async function apiDelete<T>(path: string): Promise<T> {
+  const response = await apiFetch(path, { method: "DELETE" });
+  return (await response.json()) as T;
+}
+
+/** Downloads a binary response (e.g. the PDF report) through the same
+ * authenticated fetch every other call uses, then hands the browser a
+ * blob URL to save - a plain <a href> can't carry the auth header. */
+export async function downloadFile(path: string, filename: string): Promise<void> {
+  const response = await apiFetch(path);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+export function getPipelineSocketUrl(): string {
+  const token = tokenStorage.getToken();
+  const base = API_BASE_URL.replace(/^http/, "ws");
+  return `${base}/ws/pipeline${token ? `?token=${encodeURIComponent(token)}` : ""}`;
+}

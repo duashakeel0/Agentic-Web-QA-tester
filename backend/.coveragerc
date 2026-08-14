@@ -1,0 +1,10 @@
+[run]
+source = app
+omit =
+    # Manual CLI runners for local debugging (python -m app.agents.run_*) -
+    # not part of the tested application surface (the real API/pipeline
+    # paths they exercise are covered directly by the test suite).
+    app/agents/run_*.py
+
+[report]
+skip_empty = true

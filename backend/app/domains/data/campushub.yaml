@@ -1,0 +1,71 @@
+# base_url assumes the frontend is running locally on Vite's default dev
+# port. Update if CampusHub is ever deployed somewhere else.
+#
+# Steps below are verified against CampusHub's real source (src/pages,
+# src/components/AttendanceForm.tsx) on the week5-mcp-multiagent branch of
+# duashakeel0/-arbisoft-internship, not guessed. Deliberately excludes an
+# "add student" workflow and a "register new account" workflow:
+# Student.student_id and User.username are both unique in the Django
+# models, so a fixed value only succeeds once - every run after the first
+# would fail, unlike the workflows below.
+name: campushub
+base_url: http://localhost:5173
+workflows:
+  - name: student_login
+    smoke: true
+    steps:
+      - Navigate to /login
+      - Enter a valid username and password
+      - Submit the login form
+    expected_outcome:
+      text_contains: Welcome to CampusHub
+
+  - name: mark_attendance
+    steps:
+      - Log in with valid credentials
+      - Navigate to /attendance
+      - Fill in the attendance form for a student and submit
+    expected_outcome:
+      text_contains: Attendance marked successfully
+
+  - name: view_own_records
+    smoke: true
+    steps:
+      - Log in with valid credentials
+      - Navigate to /attendance
+    expected_outcome:
+      text_contains: Attendance Records
+
+  - name: view_students
+    steps:
+      - Log in with valid credentials
+      - Navigate to /students
+    expected_outcome:
+      text_contains: Manage student records here.
+
+  - name: edit_attendance_record
+    steps:
+      - Log in with valid credentials
+      - Navigate to /attendance
+      - Fill in the attendance form for a student and submit to create a record
+      - Click the Edit button on the newly created record in the Attendance Records table
+      - Change the status in the form and submit to update the record
+    expected_outcome:
+      text_contains: Attendance record updated!
+
+  - name: delete_attendance_record
+    steps:
+      - Log in with valid credentials
+      - Navigate to /attendance
+      - Fill in the attendance form for a student and submit to create a record
+      - Click the Delete button on the newly created record in the Attendance Records table
+    expected_outcome:
+      text_contains: Attendance record deleted.
+
+  - name: login_invalid_credentials
+    steps:
+      - Navigate to /login
+      - Enter an invalid username and password
+      - Submit the login form
+    expected_outcome:
+      text_contains: Login failed

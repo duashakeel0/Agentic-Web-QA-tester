@@ -1,0 +1,117 @@
+# Parasoft's public ParaBank demo - a full online banking app built
+# specifically for automation practice (no real money/accounts). Unlike
+# Sauce Demo it has no fixed shared login - REPLACE_WITH_* below must be
+# swapped for a real account's credentials (register once at
+# https://parabank.parasoft.com/parabank/register.htm) before these
+# workflows will actually pass.
+#
+# Steps are the known-correct flow a human tester would follow, exactly
+# per the proposal's domain knowledge model - the Explorer still finds the
+# real element for each step itself from the live page, it just doesn't
+# invent the overall flow/order from nothing.
+name: parabank
+base_url: https://parabank.parasoft.com/parabank/index.htm
+workflows:
+  - name: login
+    smoke: true
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+    expected_outcome:
+      url_contains: overview.htm
+      text_contains: Accounts Overview
+
+  - name: transfer_funds
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Open the Transfer Funds page from Account Services
+      - Enter "50" as the amount to transfer
+      - Submit the transfer
+    expected_outcome:
+      text_contains: Transfer Complete
+
+  - name: pay_bill
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Open the Bill Pay page from Account Services
+      - Enter "Electric Company" as the payee name
+      - Enter "123 Main Street" as the payee address
+      - Enter "Metropolis" as the payee city
+      - Enter "NY" as the payee state
+      - Enter "10001" as the payee zip code
+      - Enter "5551234567" as the payee phone number
+      - Enter "12345" as the payee account number
+      - Enter "12345" to verify the payee account number
+      - Enter "25" as the payment amount
+      - Click the Send Payment button
+    expected_outcome:
+      text_contains: Bill Payment Complete
+
+  - name: open_new_account
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Open the Open New Account page from Account Services
+      - Select "SAVINGS" as the account type
+      - Select the first available account to fund it from
+      - Click the Open New Account button
+    expected_outcome:
+      text_contains: Account Opened!
+
+  - name: find_transactions
+    smoke: true
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Open the Find Transactions page from Account Services
+      - Select the first available account
+    expected_outcome:
+      text_contains: Find Transactions
+
+  - name: update_contact_info
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Open the Update Contact Info page from Account Services
+      - Enter "5559876543" as the phone number
+      - Click the Update Profile button
+    expected_outcome:
+      text_contains: Profile Updated
+
+  - name: request_loan
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Open the Request Loan page from Account Services
+      - Enter "5000" as the loan amount
+      - Enter "1000" as the down payment
+      - Select the first available account to fund the down payment from
+      - Click the Apply Now button
+    expected_outcome:
+      text_contains: Loan Request Processed
+
+  - name: log_out
+    steps:
+      - Navigate to the ParaBank homepage
+      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
+      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Click the Log In button
+      - Click the Log Out link
+    expected_outcome:
+      text_contains: Customer Login

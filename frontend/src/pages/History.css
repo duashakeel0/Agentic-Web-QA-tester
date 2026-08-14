@@ -1,0 +1,310 @@
+.history-page {
+  max-width: 1140px;
+}
+
+.history-title {
+  margin: 0 0 0.35rem;
+  font-size: var(--text-display);
+  font-weight: 700;
+}
+
+.history-subtitle {
+  color: var(--text);
+  font-size: var(--text-body);
+  margin: 0 0 var(--space-5);
+}
+
+.history-controls {
+  display: flex;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.history-search-field {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 9px var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--code-bg);
+  color: var(--text);
+}
+
+.history-search-field input {
+  flex: 1;
+  border: none;
+  background: none;
+  outline: none;
+  color: var(--text-h);
+  font: inherit;
+  font-size: 14px;
+}
+
+.history-search-field:focus-within {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 3px var(--accent-bg);
+}
+
+.history-provider-chips {
+  display: flex;
+  gap: 6px;
+  padding: 3px;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+}
+
+.history-chip {
+  padding: 7px 13px;
+  border-radius: var(--radius-control);
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.history-chip:hover {
+  color: var(--text-h);
+}
+
+.history-chip.active {
+  background: var(--bg);
+  border-color: var(--accent-border);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.history-search-submit {
+  padding: 9px var(--space-5);
+  border-radius: var(--radius-control);
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.history-search-submit:hover {
+  opacity: 0.92;
+}
+
+.history-error {
+  color: var(--status-critical);
+  font-size: 14px;
+  margin-bottom: var(--space-3);
+}
+
+.history-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+}
+
+.history-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+}
+
+.history-table th {
+  text-align: left;
+  padding: var(--space-3);
+  background: var(--code-bg);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.history-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
+.history-sort-btn:hover,
+.history-sort-btn.active {
+  color: var(--accent);
+}
+
+.history-table td {
+  padding: 10px var(--space-3);
+  border-top: 1px solid var(--border);
+  color: var(--text-h);
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.history-table tbody tr:hover td {
+  background: var(--surface-2);
+}
+
+.history-table th:last-child,
+.history-table td:last-child {
+  padding-right: var(--space-4);
+}
+
+.history-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: center;
+  color: var(--text);
+  padding: var(--space-7) var(--space-4);
+  white-space: normal;
+}
+
+.history-empty p {
+  margin: 0;
+  font-size: 13.5px;
+}
+
+.history-skeleton-row td {
+  padding: var(--space-2) var(--space-3);
+}
+
+.history-skeleton-bar {
+  height: 18px;
+  border-radius: var(--radius-control);
+  background: linear-gradient(90deg, var(--code-bg) 25%, var(--border) 37%, var(--code-bg) 63%);
+  background-size: 400% 100%;
+  animation: history-shimmer 1.4s ease infinite;
+}
+
+@keyframes history-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+.history-ticket {
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.history-provider-tag {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border);
+}
+
+.history-provider-claude {
+  color: var(--accent);
+  border-color: var(--accent-border);
+  background: var(--accent-bg);
+}
+
+.history-provider-ollama {
+  color: var(--ollama-color);
+  border-color: color-mix(in srgb, var(--ollama-color) 45%, transparent);
+  background: color-mix(in srgb, var(--ollama-color) 14%, transparent);
+}
+
+.history-status {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+}
+
+.history-status-pass {
+  color: var(--status-good);
+  background: var(--status-good-bg);
+}
+
+.history-status-pass_with_issues {
+  color: var(--status-warning);
+  background: var(--status-warning-bg);
+}
+
+.history-status-fail {
+  color: var(--status-critical);
+  background: var(--status-critical-bg);
+}
+
+.history-status-unmatched {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.history-view-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.history-view-link:hover {
+  text-decoration: underline;
+}
+
+.history-pagination {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
+
+.history-pagination-range {
+  font-size: 12.5px;
+  color: var(--text);
+}
+
+.history-pagination button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px var(--space-4);
+  border-radius: var(--radius-control);
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-h);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+
+.history-pagination button:hover:not(:disabled) {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.history-pagination button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+@media (max-width: 720px) {
+  .history-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

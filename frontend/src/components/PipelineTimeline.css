@@ -1,0 +1,140 @@
+.pipeline-timeline {
+  display: flex;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+}
+
+.timeline-column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 160px;
+}
+
+.timeline-provider {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  width: fit-content;
+  padding: 2px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-bg);
+}
+
+.timeline-provider-ollama {
+  color: var(--ollama-color);
+  background: color-mix(in srgb, var(--ollama-color) 14%, transparent);
+}
+
+.timeline-steps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.timeline-step {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.timeline-step-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.timeline-connector {
+  width: 2px;
+  flex: 1;
+  min-height: 18px;
+  background: var(--border);
+  margin: 2px 0;
+}
+
+.timeline-done .timeline-connector {
+  background: var(--status-good);
+  opacity: 0.5;
+}
+
+.timeline-step-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-bottom: var(--space-3);
+  min-width: 0;
+}
+
+.timeline-step-label {
+  font-size: 13.5px;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.timeline-step.timeline-done .timeline-step-label,
+.timeline-step.timeline-running .timeline-step-label {
+  color: var(--text-h);
+  font-weight: 600;
+}
+
+.timeline-step-duration {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text);
+  opacity: 0.8;
+}
+
+.timeline-step-elapsed {
+  color: var(--status-warning);
+  opacity: 1;
+}
+
+.timeline-step-error-msg {
+  color: var(--status-critical);
+  opacity: 1;
+  font-family: var(--sans);
+  max-width: 220px;
+  white-space: normal;
+  line-height: 1.4;
+}
+
+.stage-icon {
+  flex-shrink: 0;
+}
+
+.stage-done {
+  color: var(--status-good);
+}
+
+.stage-error {
+  color: var(--status-critical);
+}
+
+.stage-running {
+  color: var(--status-warning);
+  animation: timeline-spin 1s linear infinite;
+}
+
+.stage-pending {
+  color: var(--border-strong, var(--border));
+}
+
+@keyframes timeline-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-running {
+    animation: none;
+  }
+}
