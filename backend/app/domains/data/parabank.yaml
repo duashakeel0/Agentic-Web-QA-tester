@@ -1,9 +1,8 @@
 # Parasoft's public ParaBank demo - a full online banking app built
 # specifically for automation practice (no real money/accounts). Unlike
-# Sauce Demo it has no fixed shared login - REPLACE_WITH_* below must be
-# swapped for a real account's credentials (register once at
-# https://parabank.parasoft.com/parabank/register.htm) before these
-# workflows will actually pass.
+# Sauce Demo it has no fixed shared login - a real account's credentials
+# are filled in below (registered at
+# https://parabank.parasoft.com/parabank/register.htm).
 #
 # Steps are the known-correct flow a human tester would follow, exactly
 # per the proposal's domain knowledge model - the Explorer still finds the
@@ -16,8 +15,8 @@ workflows:
     smoke: true
     steps:
       - Navigate to the ParaBank homepage
-      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
-      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Enter "admin" into the Username field
+      - Enter "admin123" into the Password field
       - Click the Log In button
     expected_outcome:
       url_contains: overview.htm
@@ -26,8 +25,8 @@ workflows:
   - name: transfer_funds
     steps:
       - Navigate to the ParaBank homepage
-      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
-      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Enter "admin" into the Username field
+      - Enter "admin123" into the Password field
       - Click the Log In button
       - Open the Transfer Funds page from Account Services
       - Enter "50" as the amount to transfer
@@ -38,8 +37,8 @@ workflows:
   - name: pay_bill
     steps:
       - Navigate to the ParaBank homepage
-      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
-      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Enter "admin" into the Username field
+      - Enter "admin123" into the Password field
       - Click the Log In button
       - Open the Bill Pay page from Account Services
       - Enter "Electric Company" as the payee name
@@ -58,8 +57,8 @@ workflows:
   - name: open_new_account
     steps:
       - Navigate to the ParaBank homepage
-      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
-      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Enter "admin" into the Username field
+      - Enter "admin123" into the Password field
       - Click the Log In button
       - Open the Open New Account page from Account Services
       - Select "SAVINGS" as the account type
@@ -72,8 +71,8 @@ workflows:
     smoke: true
     steps:
       - Navigate to the ParaBank homepage
-      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
-      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Enter "admin" into the Username field
+      - Enter "admin123" into the Password field
       - Click the Log In button
       - Open the Find Transactions page from Account Services
       - Select the first available account
@@ -83,8 +82,8 @@ workflows:
   - name: update_contact_info
     steps:
       - Navigate to the ParaBank homepage
-      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
-      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Enter "admin" into the Username field
+      - Enter "admin123" into the Password field
       - Click the Log In button
       - Open the Update Contact Info page from Account Services
       - Enter "5559876543" as the phone number
@@ -95,8 +94,8 @@ workflows:
   - name: request_loan
     steps:
       - Navigate to the ParaBank homepage
-      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
-      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Enter "admin" into the Username field
+      - Enter "admin123" into the Password field
       - Click the Log In button
       - Open the Request Loan page from Account Services
       - Enter "5000" as the loan amount
@@ -109,8 +108,8 @@ workflows:
   - name: log_out
     steps:
       - Navigate to the ParaBank homepage
-      - Enter "REPLACE_WITH_PARABANK_USERNAME" into the Username field
-      - Enter "REPLACE_WITH_PARABANK_PASSWORD" into the Password field
+      - Enter "admin" into the Username field
+      - Enter "admin123" into the Password field
       - Click the Log In button
       - Click the Log Out link
     expected_outcome:
