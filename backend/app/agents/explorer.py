@@ -94,6 +94,15 @@ _CONTAINS_TEXT_PATTERN = re.compile(r"""contains\([^,)]*,?\s*['"]([^'"]+)['"]\s*
 # or anything more elaborate - since only this simple shape is safe to
 # rewrite by matching against a single element's real id.
 _BARE_ID_SELECTOR_PATTERN = re.compile(r"^#([\w-]+)$")
+# A "#id" selector whose id starts with a plain digit - some apps
+# (ParaBank included) auto-generate GUID-style element ids like
+# "90d169c6-8578-4629-8478-8fda1bc2dd5e". CSS id selectors can't begin
+# with an unescaped digit: "#90d169c6-..." throws a SyntaxError from
+# querySelectorAll at runtime even though the model picked the exact
+# right element - confirmed for real on a ParaBank Pay Bill run (payee
+# phone number field) against Groq/Llama. Rewritten below to the
+# equivalent attribute-selector form, which has no such restriction.
+_DIGIT_LEADING_ID_SELECTOR_PATTERN = re.compile(r"^#([0-9][\w-]*)$")
 # A literal URL named in a step's own text (e.g. "Navigate to the URL
 # https://x/auth/login") - used by the redundant-first-step skip below to
 # check the step's real target, not just assume it means domain.base_url.
@@ -282,6 +291,14 @@ class ExplorerAgent:
         text_match = _XPATH_TEXT_PATTERN.search(candidate) or _CONTAINS_TEXT_PATTERN.search(candidate)
         if text_match:
             return f'text="{text_match.group(1)}"'
+
+        digit_leading_match = _DIGIT_LEADING_ID_SELECTOR_PATTERN.match(candidate)
+        if digit_leading_match:
+            # A syntactically well-formed "#id", but one no browser can
+            # actually parse since CSS id selectors can't start with a
+            # plain digit - the attribute-selector form matches the same
+            # element with no such restriction on the id's content.
+            return f'[id="{digit_leading_match.group(1)}"]'
 
         bare_id_match = _BARE_ID_SELECTOR_PATTERN.match(candidate)
         if bare_id_match:
