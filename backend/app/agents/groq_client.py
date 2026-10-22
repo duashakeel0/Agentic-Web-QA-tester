@@ -36,6 +36,16 @@ REQUEST_TIMEOUT_SECONDS = 60.0
 MAX_RATE_LIMIT_RETRIES = 3
 _RETRY_AFTER_SECONDS_PATTERN = re.compile(r"try again in ([\d.]+)s", re.IGNORECASE)
 _DEFAULT_RATE_LIMIT_BACKOFF_SECONDS = 5.0
+# OpenAI's gpt-oss family (Groq's current replacement for the retired plain
+# Llama instant models) are reasoning models: by default they spend a chunk
+# of the response's token budget "thinking" before ever emitting the actual
+# answer. The Explorer's max_tokens was sized for a model that answers
+# directly, so an unbounded/medium-effort reasoning pass can eat the whole
+# budget and leave nothing for the real JSON - Groq then rejects the empty
+# completion as invalid JSON ("failed_generation": ""), which looks like a
+# hang followed by a confusing failure rather than what it actually is.
+# Forcing low effort keeps these models fast and leaves room for the answer.
+_REASONING_EFFORT_MODEL_PREFIXES = ("openai/gpt-oss", "gpt-oss")
 
 
 class GroqLLMClient(LLMClient):
@@ -72,18 +82,22 @@ class GroqLLMClient(LLMClient):
         started_at = time.time()
         started_monotonic = time.monotonic()
 
+        request_body = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "response_format": {"type": "json_object"},
+        }
+        if self.model.lower().startswith(_REASONING_EFFORT_MODEL_PREFIXES):
+            request_body["reasoning_effort"] = "low"
+
         for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
             try:
                 async with httpx.AsyncClient(timeout=request_timeout) as client:
                     response = await client.post(
                         API_URL,
                         headers={"Authorization": f"Bearer {self._api_key}"},
-                        json={
-                            "model": self.model,
-                            "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": max_tokens,
-                            "response_format": {"type": "json_object"},
-                        },
+                        json=request_body,
                     )
             except httpx.TimeoutException as exc:
                 raise LLMError(f"Groq didn't respond within {request_timeout:.0f}s. ({exc})") from exc
