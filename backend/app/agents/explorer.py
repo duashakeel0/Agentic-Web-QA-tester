@@ -102,7 +102,7 @@ _LITERAL_URL_PATTERN = re.compile(r"https?://\S+")
 _SNAPSHOT_JS = """
 () => Array.from(document.querySelectorAll(
   'input, textarea, select, button, a[href], [role="button"]'
-)).slice(0, 25).map((el) => {
+)).slice(0, 60).map((el) => {
   const r = el.getBoundingClientRect();
   return {
     tag: el.tagName.toLowerCase(),
